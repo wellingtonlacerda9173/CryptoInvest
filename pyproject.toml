@@ -1,0 +1,62 @@
+[project]
+name = "cryptoinvest"
+version = "0.1.0"
+description = "Robo de trading de criptomoedas (Binance Spot)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aiohttp==3.14.5",
+    "alembic==1.20.0",
+    "asyncpg==0.32.0",
+    "ccxt==4.5.88",
+    "numpy==2.5.4",
+    "pandas==3.0.6",
+    "pydantic==2.14.1",
+    "pydantic-settings==2.16.0",
+    "python-dotenv==1.2.4",
+    "redis==8.1.0",
+    "sqlalchemy[asyncio]==2.1.5",
+    "structlog==26.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "hypothesis==6.170.1",
+    "mypy==2.4.0",
+    "pandas-stubs==3.0.5.260914",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.17.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["engine/infrastructure/persistence/migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM", "RUF", "S", "PT"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["ccxt", "ccxt.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not integration'"
+markers = ["integration: requer rede e/ou banco de dados (pulavel se indisponivel)"]
