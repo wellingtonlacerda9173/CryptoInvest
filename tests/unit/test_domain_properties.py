@@ -120,7 +120,7 @@ def test_risk_config_respects_hard_ceilings(
     assert cfg.risk_per_trade <= cfg.max_daily_loss <= MAX_DAILY_LOSS
     assert 0 < cfg.max_position_fraction <= 1
     assert cfg.min_reward_risk >= 2
-    assert 1 <= cfg.max_open_positions <= 20
+    assert 1 <= cfg.max_open_positions <= 2
 
 
 @given(value=st.decimals(min_value="-1", max_value="5", places=4))

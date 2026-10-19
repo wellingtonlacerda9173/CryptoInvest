@@ -29,21 +29,21 @@ def test_model_copy_rejects_unknown_keys() -> None:
 def test_model_copy_with_known_keys_still_works_and_tracks_fields_set() -> None:
     cfg = RiskConfig()
 
-    copy = cfg.model_copy(update={"max_open_positions": 5})
+    copy = cfg.model_copy(update={"max_open_positions": 1})
 
-    assert copy.max_open_positions == 5
+    assert copy.max_open_positions == 1
     assert copy.model_fields_set == {"max_open_positions"}
     assert cfg.model_fields_set == set()
 
 
 def test_model_construct_preserves_fields_set() -> None:
-    cfg = RiskConfig.model_construct(max_open_positions=4)
+    cfg = RiskConfig.model_construct(max_open_positions=1)
 
     assert cfg.model_fields_set == {"max_open_positions"}
 
 
 def test_model_construct_honors_explicit_fields_set() -> None:
-    cfg = RiskConfig.model_construct({"max_open_positions", "risk_per_trade"}, max_open_positions=4)
+    cfg = RiskConfig.model_construct({"max_open_positions", "risk_per_trade"}, max_open_positions=1)
 
     assert cfg.model_fields_set == {"max_open_positions", "risk_per_trade"}
 

@@ -2,7 +2,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from engine.domain.base import DomainModel
 from engine.domain.types import Fee, Price, Quantity, Symbol, UtcDatetime
@@ -11,6 +11,7 @@ from engine.domain.types import Fee, Price, Quantity, Symbol, UtcDatetime
 class ExitReason(StrEnum):
     STOP_LOSS = "stop_loss"
     TAKE_PROFIT = "take_profit"
+    PROFIT_PROTECTION = "profit_protection"
     SIGNAL = "signal"
     MANUAL = "manual"
 
@@ -18,6 +19,7 @@ class ExitReason(StrEnum):
 class Trade(DomainModel):
     """Operacao encerrada (round-trip). Taxas em moeda de cotacao."""
 
+    trade_id: str | None = Field(default=None, min_length=1)
     symbol: Symbol
     quantity: Quantity
     entry_price: Price
