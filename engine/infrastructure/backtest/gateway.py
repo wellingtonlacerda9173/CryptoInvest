@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Literal
 
 from engine.domain.candle import Candle
+from engine.domain.gateway import DuplicateOrderError, UnknownOrderError
 from engine.domain.market import Balance, OrderBookSnapshot
 from engine.domain.order import (
     EntryOrder,
@@ -23,14 +24,6 @@ from engine.infrastructure.backtest.fills import Fill, FillKind, Liquidity
 
 _BPS = Decimal(10_000)
 _OCO_SUFFIX = ":oco"
-
-
-class DuplicateOrderError(ValueError):
-    pass
-
-
-class UnknownOrderError(KeyError):
-    pass
 
 
 @dataclass

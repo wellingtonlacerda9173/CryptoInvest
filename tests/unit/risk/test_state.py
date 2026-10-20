@@ -202,7 +202,7 @@ class RiskMachine(RuleBasedStateMachine):
     def pause(self) -> None:
         self._advance(self.state.pause("div", self.now))
 
-    @precondition(lambda self: self.state.halted)
+    @precondition(lambda self: self.state.halted and self.state.equity > 0)
     @rule()
     def reactivate(self) -> None:
         self._advance(self.state.reactivate(operator="op", reason="ok", now=self.now))
@@ -240,6 +240,17 @@ class RiskMachine(RuleBasedStateMachine):
     def serializable(self) -> None:
         assert RiskState.model_validate_json(self.state.model_dump_json()) == self.state
 
+    @precondition(lambda self: self.state.halted and self.state.equity <= 0)
+    @rule()
+    def reactivate_without_capital_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="zero equity"):
+            self.state.reactivate(operator="op", reason="ok", now=self.now)
+
+    @invariant()
+    def zero_equity_always_halts(self) -> None:
+        if self.state.equity <= 0:
+            assert self.state.halted
+
 
 TestRiskMachine = RiskMachine.TestCase
 TestRiskMachine.settings = settings(max_examples=60, stateful_step_count=30, deadline=None)
@@ -248,3 +259,17 @@ TestRiskMachine.settings = settings(max_examples=60, stateful_step_count=30, dea
 def test_trade_fixture_pnl_matches_expectation() -> None:
     assert isinstance(trade("-10"), Trade)
     assert trade("-10").pnl == D(-10)
+
+
+def test_loss_larger_than_equity_zeroes_the_account_and_halts_instead_of_crashing() -> None:
+    state = fresh(500).record_trade(trade("-600"), NOW, CFG)
+
+    assert state.equity == 0 and state.halted and state.halt_reason == "capital zerado"
+    assert code(state, now=NOW) is RejectionCode.ROBOT_HALTED
+
+
+def test_reactivate_is_refused_while_the_account_has_no_capital() -> None:
+    state = fresh(500).record_trade(trade("-600"), NOW, CFG)
+
+    with pytest.raises(ValueError, match="zero equity"):
+        state.reactivate(operator="op", reason="ok", now=NOW)

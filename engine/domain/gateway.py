@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 
 from engine.domain.candle import Candle
@@ -34,3 +35,23 @@ class ExchangeGateway(MarketDataGateway, Protocol):
     async def cancel_order(self, symbol: Symbol, client_order_id: str) -> OrderReport: ...
 
     async def get_order(self, symbol: Symbol, client_order_id: str) -> OrderReport: ...
+
+
+class DuplicateOrderError(ValueError):
+    """`client_order_id` ja usado neste gateway."""
+
+
+class UnknownOrderError(KeyError):
+    """Ordem (ou OCO) inexistente ou nao mais ativa."""
+
+
+class ProtectedOrderGateway(ExchangeGateway, Protocol):
+    """Gateway que mantem o OCO (stop + alvo) de cada entrada e deixa a gestao da posicao ajusta-lo."""
+
+    def raise_stop(self, client_order_id: str, new_stop: Decimal) -> OrderReport:
+        """Sobe o stop do OCO da entrada; nunca desce e nunca alcanca o alvo nem o preco corrente."""
+        ...
+
+    def drop_target(self, client_order_id: str) -> OrderReport:
+        """Transforma o OCO em stop puro: o alvo passa a ser gerido por ordens manuais (parcial)."""
+        ...

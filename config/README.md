@@ -2,8 +2,8 @@
 
 O gate de risco so aprova entradas ao vivo se o calendario tiver cobertura valida. Arquivo ausente, sem
 `loaded_at`/`valid_until`, vencido ou vazio sem confirmacao => toda entrada e recusada com
-`event_calendar_stale` (falha fechada). Backtest/replay historico pode dispensar a cobertura passando
-`historical=True` a `evaluate_entry`.
+`event_calendar_stale` (falha fechada). O backtest dispensa a cobertura (`mode="backtest"` em `evaluate_entry`); o
+paper so a dispensa com a flag explicita `--allow-open-calendar` (aviso a cada decisao); o Live nunca.
 
 ## Campos
 

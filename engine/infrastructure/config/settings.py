@@ -57,6 +57,8 @@ class Settings(BaseSettings):
 
     binance_rest_url: str = "https://api.binance.com/api/v3"
     binance_ws_url: str = "wss://stream.binance.com:9443"
+    # o runner do paper usa a porta 443 (a 9443 e bloqueada em algumas redes); sobrescreva por PAPER_WS_URL
+    paper_ws_url: str = "wss://stream.binance.com:443"
     binance_api_key: SecretStr | None = None
     binance_api_secret: SecretStr | None = None
 

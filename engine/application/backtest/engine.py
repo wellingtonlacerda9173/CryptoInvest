@@ -25,12 +25,14 @@ from engine.application.risk import (
     RiskState,
     SymbolRules,
     close_position,
+    emergency_trade,
     evaluate_entry,
     expire_pending,
     manage_position,
     open_position,
+    plan_partial,
+    rolling_quote_volume,
 )
-from engine.application.risk.sizing import floor_to_step, meets_minimums
 from engine.application.strategies import Strategy, StrategyContext, StrategySignal
 from engine.domain.candle import Candle
 from engine.domain.order import ExitOrder, OrderStatus, OrderType
@@ -45,7 +47,6 @@ _OCO, _PARTIAL, _MARKET_EXIT, _EMERGENCY = "oco", "partial", "x", "emg"
 # ainda contam como posteriores a foto, sem serem descartados por `RiskState.record_trade`
 _PHOTO_LAG = timedelta(microseconds=1)
 _RECONCILE_TOLERANCE = Decimal("0.000001")
-_DAY_SECONDS = 86_400
 
 
 def _utc_now() -> datetime:
@@ -227,14 +228,8 @@ class _Session:
     async def _protect(self, live: _Live, position: ManagedPosition) -> None:
         """Stop puro no OCO; o alvo vira um limit de venda do tamanho da parcial de `manage_position`."""
         self.gateway.drop_target(live.entry_id)
-        target = position.take_profit
-        part = floor_to_step(position.quantity * self.risk.partial_exit_fraction, self.rules.step_size)
-        rest = position.quantity - part
-        viable = target is not None and all(
-            meets_minimums(quantity, price, self.rules) is None
-            for quantity, price in ((part, target), (rest, target), (rest, position.stop))
-        )
-        if not viable or target is None:
+        plan = plan_partial(position, self.risk, self.rules)
+        if plan is None:
             # mesmo estado a que `manage_position` chegaria sem poder dividir: trailing na posicao inteira
             live.position = position.model_copy(update={"partial_done": True, "take_profit": None})
             return
@@ -242,8 +237,8 @@ class _Session:
             client_order_id=f"{live.entry_id}:{_PARTIAL}",
             symbol=self.symbol,
             type=OrderType.LIMIT,
-            quantity=part,
-            price=target,
+            quantity=plan.quantity,
+            price=plan.price,
             created_at=self._now(),
         )
         report = await self.gateway.place_order(order)
@@ -292,17 +287,13 @@ class _Session:
         emergency = live.emergency
         if emergency is None:
             raise BacktestInvariantError("trade de emergencia sem EmergencyExit")
-        return Trade(
+        return emergency_trade(
+            emergency,
             trade_id=f"{live.entry_id}:{_EMERGENCY}",
-            symbol=emergency.symbol,
-            quantity=emergency.quantity,
-            entry_price=emergency.fill_price,
-            exit_price=fill.price,
-            entry_fee=emergency.entry_fee,
-            exit_fee=fill.fee,
-            opened_at=emergency.opened_at,
-            closed_at=max(fill.at, emergency.opened_at),
-            exit_reason=reason,
+            price=fill.price,
+            fee=fill.fee,
+            at=fill.at,
+            reason=reason,
         )
 
     def _leg(self, live: _Live, trade: Trade) -> None:
@@ -460,13 +451,12 @@ class _Session:
                 name, DecisionAction.SKIPPED, "emergency_exit_pending", message, signal, result.confidence
             )
             return
-        steps = max(1, _DAY_SECONDS // self.timeframe.seconds)
         market = MarketSnapshot(
             symbol=self.symbol,
             at=now,
             bid=candle.close,
             ask=candle.close,
-            quote_volume_24h=sum((c.close * c.volume for c in window[-steps:]), Decimal(0)),
+            quote_volume_24h=rolling_quote_volume(window, self.timeframe),
         )
         outcome = evaluate_entry(
             signal,

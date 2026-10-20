@@ -5,6 +5,7 @@ from engine.application.risk.approval import (
     FillGuards,
     verify_approval,
 )
+from engine.application.risk.execution import PartialPlan, emergency_trade, plan_partial, rolling_quote_volume
 from engine.application.risk.filters import EventCalendar, EventWindow, MarketSnapshot
 from engine.application.risk.gate import evaluate_entry, expire_pending, open_position
 from engine.application.risk.position import (
@@ -46,6 +47,7 @@ __all__ = [
     "ManagedPosition",
     "ManagementResult",
     "MarketSnapshot",
+    "PartialPlan",
     "PositionSize",
     "ProtectiveStop",
     "Rejection",
@@ -53,6 +55,7 @@ __all__ = [
     "RiskState",
     "SymbolRules",
     "close_position",
+    "emergency_trade",
     "evaluate_entry",
     "exit_fill_id",
     "expire_pending",
@@ -60,7 +63,9 @@ __all__ = [
     "manage_position",
     "open_position",
     "pause_on_divergence",
+    "plan_partial",
     "reconcile",
+    "rolling_quote_volume",
     "size_position",
     "verify_approval",
 ]

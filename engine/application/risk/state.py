@@ -138,7 +138,8 @@ class RiskState(DomainModel):
         """Registra o resultado LIQUIDO de taxas (append-only) e aplica as travas.
 
         Idempotente por `trade_id`. Perdas nunca sao reclassificadas; perda so de taxa e perda. Resultado
-        nulo (empate) nao conta como perda nem zera a sequencia; so um ganho zera.
+        nulo (empate) nao conta como perda nem zera a sequencia; so um ganho zera. O patrimonio nunca fica
+        negativo: perda maior que o capital zera a conta e desliga o robo (HALT por capital zerado).
         """
         require_aware(now)
         if trade.trade_id is not None and any(t.trade_id == trade.trade_id for t in self.ledger):
@@ -162,7 +163,7 @@ class RiskState(DomainModel):
             state.equity_observed_at is not None and trade.closed_at <= state.equity_observed_at
         )
         applied = Decimal(0) if already_observed else pnl
-        equity = state.equity + applied
+        equity = max(state.equity + applied, Decimal(0))
         state = state.model_copy(
             update={
                 "equity": equity,
@@ -196,6 +197,8 @@ class RiskState(DomainModel):
         if not self.halted:
             raise ValueError("robot is not halted")
         _require_identified(operator, reason)
+        if self.equity <= 0:
+            raise ValueError("cannot reactivate with zero equity: the account has no capital left to trade")
         entry = AuditEntry(at=now, action=AuditAction.REACTIVATED, detail=reason, operator=operator)
         return self.model_copy(
             update={
@@ -224,8 +227,12 @@ class RiskState(DomainModel):
         return state._check_drawdown(now, config)
 
     def _check_drawdown(self, now: datetime, config: RiskConfig) -> Self:
-        if self.halted or self.drawdown < config.max_drawdown:
+        if self.halted or (self.equity > 0 and self.drawdown < config.max_drawdown):
             return self
-        reason = f"drawdown {self.drawdown:.4f} >= {config.max_drawdown} a partir do pico {self.peak_equity}"
+        reason = (
+            "capital zerado"
+            if self.equity <= 0
+            else f"drawdown {self.drawdown:.4f} >= {config.max_drawdown} a partir do pico {self.peak_equity}"
+        )
         entry = AuditEntry(at=now, action=AuditAction.HALTED, detail=reason)
         return self.model_copy(update={"halted": True, "halt_reason": reason, "audit": (*self.audit, entry)})

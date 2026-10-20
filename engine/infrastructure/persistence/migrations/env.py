@@ -33,4 +33,19 @@ async def _run_async() -> None:
     await engine.dispose()
 
 
-asyncio.run(_run_async())
+def _run_offline() -> None:
+    # `alembic upgrade|downgrade ... --sql`: renderiza o DDL sem conectar (sem banco, sem segredos)
+    context.configure(
+        url="postgresql+asyncpg://",
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+if context.is_offline_mode():
+    _run_offline()
+else:
+    asyncio.run(_run_async())
