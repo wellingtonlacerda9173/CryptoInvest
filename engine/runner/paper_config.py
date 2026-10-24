@@ -49,6 +49,8 @@ class PaperRunConfig(DomainModel):
     reconcile_seconds: int = Field(default=300, gt=0)
     blind_alert_seconds: int = Field(default=300, gt=0)
     max_eval_lag_seconds: int | None = Field(default=None, gt=0)
+    # hash do documento versionado (config_versions) que originou este run; entra no hash do run quando existe
+    document_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def _check_symbols(self) -> Self:
@@ -76,7 +78,7 @@ class PaperRunConfig(DomainModel):
         )
 
     def trading_fields(self) -> dict[str, object]:
-        return self.model_dump(
+        fields = self.model_dump(
             mode="json",
             include={
                 "symbols",
@@ -92,6 +94,9 @@ class PaperRunConfig(DomainModel):
                 "max_book_age_seconds",
             },
         )
+        if self.document_hash is not None:
+            fields["document_hash"] = self.document_hash
+        return fields
 
     def config_hash(self) -> str:
         raw = json.dumps(self.trading_fields(), sort_keys=True, separators=(",", ":"))

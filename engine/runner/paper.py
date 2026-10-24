@@ -24,11 +24,19 @@ from engine.domain.risk import RiskConfig
 from engine.domain.types import Timeframe
 from engine.infrastructure.binance.market_data import BinanceMarketData
 from engine.infrastructure.config.logging import configure_logging, scrub_text
-from engine.infrastructure.config.settings import Settings, load_settings
+from engine.infrastructure.config.redis_auth import with_redis_password
+from engine.infrastructure.config.settings import Settings, load_settings, resolve_secrets_dir
+from engine.infrastructure.notifications import AlertDispatcher, NotifySettings, build_notifier
 from engine.infrastructure.paper import SystemClock
 from engine.infrastructure.persistence.recovery import load_recovery_state
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.backtest import STRATEGY_NAMES, build_strategies, git_version, parse_values
+from engine.runner.command_channel import (
+    RedisCommandSource,
+    SignedCommandSource,
+    SqlAuditSink,
+    load_command_key,
+)
 from engine.runner.paper_config import (
     DEFAULT_CALENDAR,
     DEFAULT_DATA_DIR,
@@ -51,6 +59,7 @@ from engine.runner.paper_lock import AlreadyRunningError, InstanceLock, database
 from engine.runner.paper_report import build_cumulative, build_daily, write_report
 from engine.runner.paper_report_data import UnknownRunError, collect_inputs
 from engine.runner.paper_robot import PaperRobot
+from engine.runner.paper_versioned import apply_versioned_config
 
 log = structlog.get_logger()
 
@@ -94,6 +103,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--emergency-liquidate", action="store_true", help="emergency-stop sempre liquida")
     start.add_argument("--no-redis", action="store_true")
+    start.add_argument(
+        "--no-versioned-config",
+        action="store_true",
+        help="ignora a configuracao versionada do painel e usa so os argumentos da CLI",
+    )
+    start.add_argument(
+        "--no-signed-commands", action="store_true", help="nao consome o canal Redis de comandos assinados"
+    )
     start.add_argument("--log-level", default=None)
     start.add_argument("--json-logs", action="store_true")
 
@@ -183,7 +200,7 @@ def install_signal_handlers(loop: asyncio.AbstractEventLoop, robot: PaperRobot) 
 async def run_start(args: argparse.Namespace) -> int:
     settings = load_settings()
     configure_logging(args.log_level or settings.log_level, json=args.json_logs)
-    config = build_config(args)
+    base_config = build_config(args)
     run_id = _run_id(args, create=True)
     paths = RunPaths(args.data_dir, run_id)
     paths.ensure()
@@ -194,21 +211,44 @@ async def run_start(args: argparse.Namespace) -> int:
         print(f"erro: {error}", file=sys.stderr)
         return EXIT_USAGE
     write_latest(args.data_dir, run_id)
-    paths.config.write_text(config.model_dump_json(indent=2), encoding="utf-8")
     ws_url = args.ws_url or settings.paper_ws_url
     sha, dirty = git_version()
     version = f"{sha[:12] if sha else 'desconhecida'}{'+dirty' if dirty else ''}"
     db_engine = create_engine(settings.database_url)
     sessions = create_session_factory(db_engine)
-    bus: EventBus = NullEventBus() if args.no_redis else RedisEventBus(settings.redis_url)
+    redis_url = with_redis_password(settings.redis_url, resolve_secrets_dir())
+    signing_key = load_command_key(resolve_secrets_dir())
+    bus: EventBus = NullEventBus() if args.no_redis else RedisEventBus(redis_url, signing_key=signing_key)
     market = BinanceMarketData(rest_url=settings.binance_rest_url, ws_url=ws_url)
+    signed, signed_source = _signed_source(args, redis_url)
+    try:
+        versioned = await apply_versioned_config(
+            sessions, base_config, run_id, enabled=not args.no_versioned_config
+        )
+    except Exception as error:
+        log.critical("versioned_config_failed", error=scrub_text(repr(error)))
+        instance.release()
+        await bus.close()
+        await market.aclose()
+        await db_engine.dispose()
+        return EXIT_FATAL
+    config = versioned.config
+    paths.config.write_text(config.model_dump_json(indent=2), encoding="utf-8")
     robot = PaperRobot(
         config,
         run_id=run_id,
         journal=SqlJournal(sessions, run_id),
         bus=bus,
         market=market,
-        strategies=build_strategies(config.strategies, config.params),
+        strategies=versioned.strategies or build_strategies(config.strategies, config.params),
+        signed_commands=signed,
+        audit_sink=SqlAuditSink(sessions),
+        alerts=AlertDispatcher(
+            build_notifier(NotifySettings(), resolve_secrets_dir()),
+            run_id=run_id,
+            cooldown_seconds=NotifySettings().cooldown_seconds,
+        ),
+        config_source=versioned.source,
         rules=_rules(config.symbols),
         calendar=load_calendar(args.calendar),
         clock=SystemClock(),
@@ -252,10 +292,26 @@ async def run_start(args: argparse.Namespace) -> int:
     finally:
         instance.release()
         await bus.close()
+        if signed_source is not None:
+            await signed_source.close()
         await market.aclose()
         await db_engine.dispose()
     print(f"run {run_id} encerrado (codigo {code}); posicoes abertas mantem os stops no estado salvo")
     return code
+
+
+def _signed_source(
+    args: argparse.Namespace, redis_url: str
+) -> tuple[SignedCommandSource | None, RedisCommandSource | None]:
+    """Canal assinado (Redis) so liga com Redis ativo E chave compartilhada valida em SECRETS_DIR."""
+    if args.no_redis or args.no_signed_commands:
+        return None, None
+    key = load_command_key(resolve_secrets_dir())
+    if key is None:
+        log.warning("signed_commands_disabled", reason="command_hmac_key ausente ou curta em SECRETS_DIR")
+        return None, None
+    source = RedisCommandSource.from_url(redis_url, key)
+    return source, source
 
 
 def run_command(args: argparse.Namespace) -> int:

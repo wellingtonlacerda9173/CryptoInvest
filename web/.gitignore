@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+.vite
+*.local
+src/api/generated
+e2e-real/.stack.json
+e2e-real/.stop
+e2e-real/.stack.log

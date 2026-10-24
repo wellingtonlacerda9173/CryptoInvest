@@ -588,7 +588,7 @@ async def test_downgrades_are_reversible(alembic_config: Config, migration_url: 
     )
     try:
         await alembic(command.upgrade, alembic_config, "head")
-        assert await scalar(triggers) == 14
+        assert await scalar(triggers) == 16
         await alembic(command.downgrade, alembic_config, "0004")
         assert await scalar(triggers) == 6
         assert await scalar("SELECT to_regclass('uq_orders_client_order_id')") is not None
@@ -603,7 +603,7 @@ async def test_downgrades_are_reversible(alembic_config: Config, migration_url: 
         assert await scalar("SELECT to_regclass('candles')") is not None
 
         await alembic(command.upgrade, alembic_config, "head")
-        assert await scalar(triggers) == 14
+        assert await scalar(triggers) == 16
         assert await scalar("SELECT to_regclass('uq_orders_run_client_order_id')") is not None
         await alembic(command.check, alembic_config)
     finally:

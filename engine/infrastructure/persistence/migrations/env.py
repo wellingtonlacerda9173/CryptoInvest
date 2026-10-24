@@ -5,6 +5,7 @@ from alembic import context
 from sqlalchemy import URL, Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import api.persistence.models  # noqa: F401  (registra as tabelas da API no metadata)
 from engine.infrastructure.config.settings import load_settings
 from engine.infrastructure.persistence.models import Base
 

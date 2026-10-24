@@ -7,20 +7,28 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiohttp==3.14.5",
     "alembic==1.20.0",
+    "argon2-cffi==25.1.0",
     "asyncpg==0.32.0",
     "ccxt==4.5.88",
+    "cryptography==50.0.2",
+    "fastapi==0.151.0",
     "numpy==2.5.4",
     "pandas==3.0.6",
     "pydantic==2.14.1",
     "pydantic-settings==2.16.0",
+    "pyotp==2.10.0",
     "python-dotenv==1.2.4",
+    "qrcode==8.2",
     "redis==8.1.0",
     "sqlalchemy[asyncio]==2.1.5",
     "structlog==26.1.0",
+    "uvicorn==0.54.0",
+    "websockets==17.3",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx==0.28.1",
     "hypothesis==6.170.1",
     "mypy==2.4.0",
     "pandas-stubs==3.0.5.260914",
@@ -42,7 +50,10 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM", "RUF", "S", "PT"]
 ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
+"api/audit.py" = ["S105"]
 "tests/**" = ["S101", "S608", "PT012", "PT018"]
+"tests/*/api/**" = ["E501", "S101", "S105", "S106", "S608", "PT012", "PT018", "F401", "F811"]
+"tests/api_support.py" = ["S105"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -50,7 +61,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["ccxt", "ccxt.*"]
+module = ["ccxt", "ccxt.*", "qrcode", "qrcode.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -8,6 +8,7 @@ from engine.domain.rules import DEFAULT_MIN_REWARD_RISK
 from engine.domain.types import StrictDecimal
 
 MAX_RISK_PER_TRADE = Decimal("0.01")
+MIN_RISK_PER_TRADE = Decimal("0.0001")  # piso pratico: abaixo disso o lote nao cobre nem a taxa
 MAX_DAILY_LOSS = Decimal("0.05")
 MAX_DRAWDOWN = Decimal("0.05")
 MAX_OPEN_POSITIONS = 2
@@ -26,7 +27,9 @@ class RiskConfig(DomainModel):
     Desconto de taxa (ex.: BNB) e folga; taxa real acima da taker configurada gera `EmergencyExit`.
     """
 
-    risk_per_trade: StrictDecimal = Field(default=Decimal("0.005"), gt=0, le=MAX_RISK_PER_TRADE)
+    risk_per_trade: StrictDecimal = Field(
+        default=Decimal("0.005"), ge=MIN_RISK_PER_TRADE, le=MAX_RISK_PER_TRADE
+    )
     min_reward_risk: StrictDecimal = Field(default=DEFAULT_MIN_REWARD_RISK, ge=DEFAULT_MIN_REWARD_RISK)
     max_open_positions: StrictInt = Field(default=MAX_OPEN_POSITIONS, ge=1, le=MAX_OPEN_POSITIONS)
     max_daily_loss: StrictDecimal = Field(default=Decimal("0.01"), gt=0, le=MAX_DAILY_LOSS)

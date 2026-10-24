@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard - CryptoInvest (protótipo)</title>
+<link rel="stylesheet" href="mockup.css">
+<script>
+(function(){var q=new URLSearchParams(location.search).get('tema');var t=null;
+try{t=q||localStorage.getItem('tema');}catch(e){t=q}
+if(t==='claro'||t==='light'){document.documentElement.setAttribute('data-theme','light');}
+window.alternarTema=function(){var l=document.documentElement.getAttribute('data-theme')==='light';
+document.documentElement.setAttribute('data-theme',l?'dark':'light');try{localStorage.setItem('tema',l?'escuro':'claro')}catch(e){}};})();
+</script>
+</head>
+<body data-modo="paper">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+<symbol id="i-ctl" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+<symbol id="i-mkt" viewBox="0 0 24 24"><path d="M7 4v16M17 4v16"/><rect x="5" y="8" width="4" height="7"/><rect x="15" y="6" width="4" height="9"/></symbol>
+<symbol id="i-dec" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></symbol>
+<symbol id="i-ops" viewBox="0 0 24 24"><path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+<symbol id="i-perf" viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 4 3 5-8"/></symbol>
+<symbol id="i-bt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+<symbol id="i-cfg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14A8 8 0 0110 4a8 8 0 1010 10z"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 12l6-6 6 6"/></symbol>
+<symbol id="i-dn" viewBox="0 0 24 24"><path d="M12 5v13M6 12l6 6 6-6"/></symbol>
+<symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9.5c0-1 1.3-1.5 3-1.5s3 .6 3 1.7c0 2.3-6 1.1-6 3.6 0 1.1 1.3 1.7 3 1.7s3-.6 3-1.5M12 6v2M12 16v2"/></symbol>
+<symbol id="i-collapse" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M16 10l-3 2 3 2"/></symbol>
+</defs></svg>
+<a class="sr-only" href="#conteudo">Pular para o conteúdo</a>
+<div class="app">
+<aside class="side"><div class="side__in">
+<div class="brand"><div class="brand__logo" aria-hidden="true">C</div><span>CryptoInvest</span></div>
+<nav class="nav" aria-label="Principal">
+<a href="dashboard.html" aria-current="page"><svg class="ico " aria-hidden="true"><use href="#i-dash"/></svg><span>Dashboard</span></a>
+<a href="controle.html"><svg class="ico " aria-hidden="true"><use href="#i-ctl"/></svg><span>Controle</span><span class="badge-count" title="1 alerta">1</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-mkt"/></svg><span>Mercado</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-dec"/></svg><span>Decisões ao vivo</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-ops"/></svg><span>Operações</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-perf"/></svg><span>Desempenho</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-bt"/></svg><span>Backtest</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-cfg"/></svg><span>Configurações</span></a>
+</nav>
+<div class="side__foot"><button class="collapse" type="button" aria-label="Recolher menu"><svg class="ico " aria-hidden="true"><use href="#i-collapse"/></svg><span>Recolher menu</span></button></div>
+</aside>
+<header class="top" role="banner">
+<div class="status status--ok" role="status" aria-live="polite"><span class="status__dot"></span><span>Operando</span><span class="status__sub">aguardando sinal</span></div>
+<span class="mode mode--paper"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-coin"/></svg>PAPER <small>simulado</small></span>
+<div class="top__spacer"></div>
+<div class="top__money">
+<div class="metric"><span class="metric__label">Saldo (simulado)</span><span class="metric__value num">10.184,32 <small class="mut">USDT</small></span></div>
+<div class="metric"><span class="metric__label">Resultado do dia</span><span class="metric__value num neg"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-dn"/></svg> −30,56 <small>(−0,30%)</small></span></div>
+</div>
+<button class="btn btn--danger btn-stop" type="button" aria-haspopup="dialog"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-stop"/></svg><span>Parar <span class="lbl-long">tudo</span></span></button>
+</header>
+<main class="main" id="conteudo">
+<div class="page-head"><div><h1 class="page-title">Dashboard</h1><p>Visão geral do robô, em um olhar.</p></div>
+<button class="theme-toggle" type="button" onclick="alternarTema()" aria-label="Alternar entre tema escuro e claro"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-moon"/></svg><span>Tema escuro / claro</span></button></div>
+<div class="example-banner" role="note"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-info"/></svg><span><strong>EXEMPLO</strong> - todos os números desta tela são fictícios, só para avaliar o desenho. Nada aqui é real nem foi calculado pelo robô.</span></div>
+<section class="hero" aria-labelledby="hero-t">
+<div class="hero__icon"><svg class="ico " aria-hidden="true"><use href="#i-check"/></svg></div>
+<div><h2 class="hero__title" id="hero-t">Tudo certo: o robô está ligado e esperando uma boa oportunidade.</h2>
+<p class="hero__text">Hoje ele analisou 8 sinais e entrou em 1. <strong>Ficar parado em USDT é uma decisão válida</strong> <span>- 76% do saldo está em dólar digital (USDT) porque ainda não surgiu nada que passe nos filtros de risco.</span></p></div>
+</section>
+
+<section class="grid grid--kpi" aria-label="Indicadores principais">
+<div class="kpi"><span class="kpi__label">Patrimônio (simulado)</span><span class="kpi__value num">10.184,32<small> USDT</small></span><span class="kpi__delta num pos">▲ +1,84% desde o início</span></div>
+<div class="kpi"><span class="kpi__label">Resultado do dia</span><span class="kpi__value num">−30,56<small> USDT</small></span><span class="kpi__delta num neg">▼ −0,30% (1 operação encerrada)</span></div>
+<div class="kpi"><span class="kpi__label"><abbr class="term" tabindex="0" title="Drawdown: queda desde o ponto mais alto do saldo. É a medida mais honesta de risco.">Drawdown atual</abbr></span><span class="kpi__value num">1,8%<small> </small></span><span class="kpi__delta num mut">▲ pico em 10.371,05</span></div>
+<div class="kpi"><span class="kpi__label"><abbr class="term" tabindex="0" title="R: o risco de uma operação. +1 R = ganhei o que arriscaria perder.">Operações abertas</abbr></span><span class="kpi__value num">1 <small>de 2</small><small> </small></span><span class="kpi__delta num "><span class='infoc'>BTC/USDT ▲ +0,6 R</span></span></div>
+</section>
+
+<section class="grid grid--2">
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-shield"/></svg> Travas de risco</h2><span class="chip chip--ok"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Nenhuma trava ativada</span></div>
+<div class="limits"><div class="limit limit--ok" role="group" aria-label="Perda diária: 0,3% de 1%. Folgado">
+<div class="limit__row"><span class="limit__name"><abbr class="term" tabindex="0" title="Perda diária: quanto o saldo caiu hoje. Ao chegar no limite, o robô não abre novas operações até a meia-noite (UTC).">Perda diária</abbr></span><span class="limit__val num">0,3% de 1%</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="30" aria-label="Perda diária"><div class="limit__fill" style="width:30%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Folgado</span><span class="limit__note">se chegar a 1%, o robô para de abrir operações até 00:00 UTC</span></div></div><div class="limit limit--ok" role="group" aria-label="Drawdown: 1,8% de 5%. Folgado">
+<div class="limit__row"><span class="limit__name"><abbr class="term" tabindex="0" title="Drawdown: queda desde o ponto mais alto do saldo. É a medida mais honesta de risco.">Drawdown</abbr></span><span class="limit__val num">1,8% de 5%</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="36" aria-label="Drawdown"><div class="limit__fill" style="width:36%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Folgado</span><span class="limit__note">se chegar a 5%, o robô desliga e só você religa</span></div></div><div class="limit limit--warn" role="group" aria-label="Perdas seguidas (ETH/USDT): 1 de 2. Atenção: 1 perda a menos do limite">
+<div class="limit__row"><span class="limit__name">Perdas seguidas (ETH/USDT)</span><span class="limit__val num">1 de 2</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="Perdas seguidas (ETH/USDT)"><div class="limit__fill" style="width:50%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-warn"/></svg>Atenção: 1 perda a menos do limite</span><span class="limit__note">com 2 seguidas o par pausa por 24 h</span></div></div><div class="limit limit--ok" role="group" aria-label="Posições abertas: 1 de 2. Normal">
+<div class="limit__row"><span class="limit__name">Posições abertas</span><span class="limit__val num">1 de 2</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="Posições abertas"><div class="limit__fill" style="width:50%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Normal</span><span class="limit__note">máximo de 2 ao mesmo tempo</span></div></div><div class="limit limit--ok" role="group" aria-label="Exposição total: 24% de 50%. Normal">
+<div class="limit__row"><span class="limit__name">Exposição total</span><span class="limit__val num">24% de 50%</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="48" aria-label="Exposição total"><div class="limit__fill" style="width:48%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Normal</span><span class="limit__note">parte do saldo que está comprada</span></div></div></div></div>
+
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-lock"/></svg> Caminho para o Live</h2><span class="mode mode--paper">PAPER</span></div>
+<div class="inelig" role="alert"><svg class="ico " aria-hidden="true"><use href="#i-warn"/></svg><div><strong>Run inelegível para o Live (calendário aberto)</strong><span>Este teste rodou sem o calendário de eventos. Ele nunca vai poder liberar dinheiro real; é preciso começar um novo teste com o calendário.</span></div></div>
+<ul class="crit" aria-label="Critérios para liberar o Live">
+<li><svg class="ico no" aria-hidden="true"><use href="#i-bt"/></svg><span>Dias de teste</span><span class="crit__val">23 de 60</span></li>
+<li><svg class="ico ok" aria-hidden="true"><use href="#i-check"/></svg><span><abbr class="term" tabindex="0" title="Drawdown: queda desde o pico do saldo.">Drawdown máx.</abbr> abaixo de 5%</span><span class="crit__val pos">1,8%</span></li>
+<li><svg class="ico bad" aria-hidden="true"><use href="#i-x"/></svg><span><abbr class="term" tabindex="0" title="Profit factor: quanto se ganhou para cada 1 perdido. Acima de 1,5 é o mínimo exigido.">Profit factor</abbr> acima de 1,5</span><span class="crit__val neg">1,34</span></li>
+<li><svg class="ico no" aria-hidden="true"><use href="#i-bt"/></svg><span>Pelo menos 30 operações</span><span class="crit__val">17 de 30</span></li>
+<li><svg class="ico ok" aria-hidden="true"><use href="#i-check"/></svg><span>Pelo menos 5 perdas na amostra</span><span class="crit__val pos">6 de 5</span></li>
+</ul>
+<a class="btn" href="controle.html">Ver detalhes no Controle</a></div>
+</section>
+
+<section class="grid grid--2">
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-perf"/></svg> Curva de capital <span class="sim-tag">SIMULADO</span></h2><span class="card__hint">últimos 30 dias, USDT</span></div>
+<svg class="chart" viewBox="0 0 640 220" role="img" aria-label="Curva de capital simulada dos últimos 30 dias, de 10.000 para 10.184 USDT. Exemplo."><line class="grid-l" x1="52" x2="632" y1="194.0" y2="194.0"/><text x="44" y="198.0" text-anchor="end">9.900</text><line class="grid-l" x1="52" x2="632" y1="157.2" y2="157.2"/><text x="44" y="161.2" text-anchor="end">10.000</text><line class="grid-l" x1="52" x2="632" y1="120.4" y2="120.4"/><text x="44" y="124.4" text-anchor="end">10.100</text><line class="grid-l" x1="52" x2="632" y1="83.6" y2="83.6"/><text x="44" y="87.6" text-anchor="end">10.200</text><line class="grid-l" x1="52" x2="632" y1="46.8" y2="46.8"/><text x="44" y="50.8" text-anchor="end">10.300</text><line class="grid-l" x1="52" x2="632" y1="10.0" y2="10.0"/><text x="44" y="14.0" text-anchor="end">10.400</text><line x1="52" x2="632" y1="157.2" y2="157.2" stroke="var(--border-strong)" stroke-dasharray="4 4"/><polygon class="area" points="52.0,194.0 52.0,157.2 71.3,152.5 90.7,134.6 110.0,134.9 129.3,127.4 148.7,123.5 168.0,122.4 187.3,119.8 206.7,101.0 226.0,96.7 245.3,96.0 264.7,94.6 284.0,77.0 303.3,79.2 322.7,70.5 342.0,70.9 361.3,58.7 380.7,62.5 400.0,44.3 419.3,51.6 438.7,48.5 458.0,43.8 477.3,39.2 496.7,20.9 516.0,20.7 535.3,33.0 554.7,36.1 574.0,55.7 593.3,62.5 612.7,78.2 632.0,89.4 632.0,194.0"/><polyline class="line" points="52.0,157.2 71.3,152.5 90.7,134.6 110.0,134.9 129.3,127.4 148.7,123.5 168.0,122.4 187.3,119.8 206.7,101.0 226.0,96.7 245.3,96.0 264.7,94.6 284.0,77.0 303.3,79.2 322.7,70.5 342.0,70.9 361.3,58.7 380.7,62.5 400.0,44.3 419.3,51.6 438.7,48.5 458.0,43.8 477.3,39.2 496.7,20.9 516.0,20.7 535.3,33.0 554.7,36.1 574.0,55.7 593.3,62.5 612.7,78.2 632.0,89.4"/><circle cx="632.0" cy="89.4" r="5" fill="var(--info)" stroke="var(--surface)" stroke-width="2"/><text x="52.0" y="214" text-anchor="middle">20/09</text><text x="245.3" y="214" text-anchor="middle">30/09</text><text x="438.7" y="214" text-anchor="middle">10/10</text><text x="632.0" y="214" text-anchor="end">20/10</text></svg>
+<div class="legend"><span><i></i>Saldo simulado</span><span>Linha tracejada: capital inicial (10.000)</span></div></div>
+
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-dec"/></svg> Últimas decisões</h2><a href="#" class="card__hint">Ver todas</a></div>
+<ul class="feed">
+<li><time>14:00</time><div><div class="feed__title">BTC/USDT <span class="chip chip--ok"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-up"/></svg> Comprou</span></div><div class="feed__why">Barra elefante com rompimento. Risco 0,5%, alvo 2 R.</div></div></li>
+<li><time>14:00</time><div><div class="feed__title">ETH/USDT <span class="chip chip--warn"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-pause"/></svg> Não entrou</span></div><div class="feed__why">Há um evento de mercado nos próximos 30 min. <code>event_window</code></div></div></li>
+<li><time>13:00</time><div><div class="feed__title">BTC/USDT <span class="chip chip--off"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-coin"/></svg> Esperou</span></div><div class="feed__why">Sem sinal: mercado lateral. Ficar em USDT.</div></div></li>
+<li><time>12:00</time><div><div class="feed__title">ETH/USDT <span class="chip chip--warn"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-pause"/></svg> Não entrou</span></div><div class="feed__why">Retorno/risco 1:1,4; o mínimo é 1:2. <code>reward_risk</code></div></div></li>
+</ul></div>
+</section>
+
+<section class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-ops"/></svg> Posição aberta <span class="sim-tag">SIMULADA</span></h2><span class="card__hint">stop sempre ativo na corretora simulada</span></div>
+<div class="table-wrap"><table><thead><tr><th>Par</th><th class="num">Entrada</th><th class="num"><abbr class="term" tabindex="0" title="Stop: preço em que a operação é encerrada para limitar a perda.">Stop</abbr></th><th class="num">Alvo</th><th class="num">Tamanho</th><th class="num">Resultado</th><th>Proteção</th></tr></thead>
+<tbody><tr><td><strong>BTC/USDT</strong></td><td class="num">67.420,50</td><td class="num">66.980,00</td><td class="num">68.301,50</td><td class="num">0,0231 BTC</td><td class="num pos"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-up"/></svg> +30,60 (+0,6 R)</td><td><span class="chip chip--ok"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Stop ativo</span></td></tr></tbody></table></div></section>
+</main>
+</div>
+<nav class="bottomnav" aria-label="Principal"><a href="dashboard.html" aria-current="page"><svg class="ico " aria-hidden="true"><use href="#i-dash"/></svg><span>Início</span></a><a href="controle.html"><svg class="ico " aria-hidden="true"><use href="#i-ctl"/></svg><span>Controle</span></a><a href="#"><svg class="ico " aria-hidden="true"><use href="#i-ops"/></svg><span>Operações</span></a><a href="#"><svg class="ico " aria-hidden="true"><use href="#i-perf"/></svg><span>Desempenho</span></a><a href="#"><svg class="ico " aria-hidden="true"><use href="#i-cfg"/></svg><span>Mais</span></a></nav>
+</body></html>

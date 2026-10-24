@@ -5,6 +5,7 @@ import contextlib
 import json
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import structlog
@@ -13,11 +14,15 @@ from redis import asyncio as aioredis
 from redis.exceptions import RedisError
 
 from engine.infrastructure.config.logging import scrub_text
+from engine.runner.signing import wrap_event
 
 log = structlog.get_logger()
 
 CHANNEL_PREFIX = "cryptoinvest:paper"
 CHANNELS = ("decisions", "orders", "trades", "state", "equity", "heartbeat", "alerts", "risk")
+# ultimo valor de alguns canais, em chave com TTL: a API le o estado atual sem esperar o proximo evento
+LATEST_KINDS = frozenset({"state", "heartbeat", "equity"})
+LATEST_TTL_SECONDS = 900
 _RETRY_AFTER_SECONDS = 30.0
 _QUEUE_SIZE = 2000
 _CLOSE_FLUSH_SECONDS = 3.0
@@ -25,6 +30,35 @@ _CLOSE_FLUSH_SECONDS = 3.0
 
 def channel_name(kind: str) -> str:
     return f"{CHANNEL_PREFIX}:{kind}"
+
+
+@dataclass(frozen=True, slots=True)
+class RedisKeys:
+    """Nomes de canais e chaves Redis do robo. O prefixo isola ambientes (testes usam outro) e e o MESMO
+    contrato entre runner (publica, consome comandos) e API (assina, enfileira comandos)."""
+
+    prefix: str = CHANNEL_PREFIX
+
+    def channel(self, kind: str) -> str:
+        return f"{self.prefix}:{kind}"
+
+    def latest(self, kind: str) -> str:
+        return f"{self.prefix}:last:{kind}"
+
+    @property
+    def commands(self) -> str:
+        return f"{self.prefix}:commands"
+
+    @property
+    def processing(self) -> str:
+        """Envelopes ja retirados de `commands` e ainda nao confirmados como duraveis (at-least-once)."""
+        return f"{self.prefix}:commands:processing"
+
+    def nonce(self, command_id: str) -> str:
+        return f"{self.prefix}:cmd:nonce:{command_id}"
+
+    def ack(self, command_id: str) -> str:
+        return f"{self.prefix}:cmd:ack:{command_id}"
 
 
 class EventBus(Protocol):
@@ -54,7 +88,17 @@ class RedisEventBus:
     Apos uma falha pausa as tentativas por 30 s e descarta o que chegar (os eventos tambem estao no diario).
     """
 
-    def __init__(self, url: str, *, connect_timeout: float = 5.0, io_timeout: float = 2.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        connect_timeout: float = 5.0,
+        io_timeout: float = 2.0,
+        keys: RedisKeys | None = None,
+        signing_key: bytes | None = None,
+    ) -> None:
+        self._keys = keys or RedisKeys()
+        self._signing_key = signing_key
         self._client: aioredis.Redis = aioredis.from_url(
             url, socket_connect_timeout=connect_timeout, socket_timeout=io_timeout, decode_responses=True
         )
@@ -67,7 +111,12 @@ class RedisEventBus:
 
     async def publish(self, kind: str, payload: Mapping[str, Any]) -> None:
         try:
-            body = json.dumps(to_jsonable_python(dict(payload)), separators=(",", ":"))
+            data = to_jsonable_python(dict(payload))
+            body = (
+                json.dumps(data, separators=(",", ":"))
+                if self._signing_key is None
+                else wrap_event(self._signing_key, kind, data)
+            )
         except (TypeError, ValueError) as error:
             log.warning("event_not_serializable", kind=kind, error=scrub_text(repr(error)))
             return
@@ -91,7 +140,9 @@ class RedisEventBus:
             self.dropped += 1
             return
         try:
-            await self._client.publish(channel_name(kind), body)
+            await self._client.publish(self._keys.channel(kind), body)
+            if kind in LATEST_KINDS:
+                await self._client.set(self._keys.latest(kind), body, ex=LATEST_TTL_SECONDS)
         except (RedisError, OSError, TimeoutError) as error:
             self.failures += 1
             self._down_until = time.monotonic() + _RETRY_AFTER_SECONDS

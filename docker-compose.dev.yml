@@ -31,7 +31,29 @@ services:
       timeout: 3s
       retries: 20
 
+  # Opcional (perfil `redis-auth`): Redis com senha vinda do secret `redis_password`. NAO substitui o
+  # servico `redis` acima: pare-o antes (mesma porta) e suba so este com
+  #   docker compose -f docker-compose.dev.yml --profile redis-auth up -d redis-auth
+  # API e runner leem a mesma senha do arquivo `redis_password` em SECRETS_DIR. Mantenha a porta so em
+  # loopback/rede restrita: as mensagens sao assinadas, mas a disponibilidade depende do acesso a porta.
+  redis-auth:
+    profiles: ["redis-auth"]
+    image: redis:8.10.2-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    secrets:
+      - redis_password
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 secrets:
+  redis_password:
+    file: ${REDIS_PASSWORD_FILE:-./secrets/redis_password}
   database_password:
     file: ./secrets/database_password
 

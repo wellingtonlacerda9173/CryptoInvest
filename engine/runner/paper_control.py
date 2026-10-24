@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -39,6 +40,44 @@ class CommandName(StrEnum):
     STOP = "stop"
     EMERGENCY_STOP = "emergency-stop"
     REACTIVATE = "reactivate"
+    # so reduz risco do robo em execucao; os parametros sao revalidados no runner (nunca aceita aumento)
+    APPLY_CONFIG = "apply-config"
+
+
+class CommandStatus(StrEnum):
+    """Resultado de EXECUTAR um comando (o que o painel mostra e o que o `ack` assinado carrega)."""
+
+    APPLIED = "applied"
+    PARTIALLY_APPLIED = "partially_applied"
+    REFUSED = "refused"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandResult:
+    status: CommandStatus
+    detail: str = ""
+
+    @classmethod
+    def applied(cls, detail: str = "") -> "CommandResult":
+        return cls(CommandStatus.APPLIED, detail)
+
+    @classmethod
+    def partial(cls, detail: str) -> "CommandResult":
+        return cls(CommandStatus.PARTIALLY_APPLIED, detail)
+
+    @classmethod
+    def refused(cls, detail: str) -> "CommandResult":
+        return cls(CommandStatus.REFUSED, detail)
+
+
+# pastas de arquivo morto e o resultado que cada uma representa para quem acompanha o comando
+ARCHIVE_STATES: dict[str, str] = {
+    "processed": "applied",
+    "failed": "failed",
+    "expired": "expired",
+    "rejected": "discarded",
+}
 
 
 class Command(DomainModel):
@@ -47,6 +86,7 @@ class Command(DomainModel):
     reason: str = Field(min_length=1, pattern=r"\S")
     liquidate: bool = False
     issued_at: UtcDatetime
+    params: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def sensitive(self) -> bool:
@@ -57,7 +97,9 @@ class Command(DomainModel):
 
     def digest(self) -> str:
         """SHA-256 do conteudo canonico do comando (vai para o `audit_log`)."""
-        raw = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        # `params` vazio fica de fora: o digest dos comandos sem parametros nao muda
+        data = self.model_dump(mode="json", exclude=None if self.params else {"params"})
+        raw = json.dumps(data, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -75,10 +117,49 @@ class CommandQueue:
         self._dir = directory
         self._ttl = ttl
 
-    def send(self, command: Command) -> Path:
-        ensure_private_dir(self._dir)
+    @staticmethod
+    def file_name(command: Command, command_id: str | None = None) -> str:
+        """`<instante>-<nome>[~<id>].json`: o id do comando assinado entra no nome (idempotencia por id)."""
         stamp = command.issued_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S%f")
-        target = self._dir / f"{stamp}-{command.name.value}.json"
+        tag = "" if command_id is None else f"~{command_id}"
+        return f"{stamp}-{command.name.value}{tag}.json"
+
+    def path_for(self, command: Command, command_id: str | None = None) -> Path:
+        return self._dir / self.file_name(command, command_id)
+
+    @staticmethod
+    def signed_id(name: str) -> str | None:
+        stem = name.removesuffix(".json")
+        return stem.partition("~")[2] or None
+
+    def signed_names(self) -> set[str]:
+        """Nomes dos comandos assinados que ainda estao na fila."""
+        return {p.name for p in self._dir.glob("*~*.json")} if self._dir.is_dir() else set()
+
+    def exists(self, name: str) -> bool:
+        return (self._dir / name).exists()
+
+    def archived_in(self, name: str) -> str | None:
+        """Pasta de arquivo morto em que o comando `name` ja esta (processed, failed...), se estiver."""
+        return next((folder for folder in ARCHIVE_STATES if (self._dir / folder / name).exists()), None)
+
+    def outcome_of(self, name: str) -> tuple[str, str] | None:
+        """`(estado, detalhe)` de um comando ja arquivado: `applied`/`partially_applied`/`refused`/`failed`/
+        `expired`/`discarded`; `None` enquanto ainda esta na fila (ou nunca existiu)."""
+        folder = self.archived_in(name)
+        if folder is None:
+            return None
+        if folder == "processed":
+            try:
+                data = json.loads((self._dir / folder / f"{name}.result").read_text(encoding="utf-8"))
+                return str(data["status"]), str(data.get("detail", ""))
+            except (OSError, ValueError, KeyError, TypeError):
+                return "applied", ""
+        return ARCHIVE_STATES[folder], ""
+
+    def send(self, command: Command, command_id: str | None = None) -> Path:
+        ensure_private_dir(self._dir)
+        target = self.path_for(command, command_id)
         temp = target.with_suffix(".tmp")
         temp.write_text(command.model_dump_json(), encoding="utf-8")
         if os.name == "posix":
@@ -119,8 +200,11 @@ class CommandQueue:
             return True
         return not_before is not None and command.issued_at < not_before
 
-    def done(self, path: Path) -> None:
+    def done(self, path: Path, result: CommandResult | None = None) -> None:
         self._archive(path, "processed")
+        if result is not None:
+            record = {"status": result.status.value, "detail": result.detail}
+            (self._dir / "processed" / f"{path.name}.result").write_text(json.dumps(record), encoding="utf-8")
 
     def register_failure(self, path: Path) -> int:
         """Conta tentativas falhas no disco (sobrevive a reinicios do processo)."""

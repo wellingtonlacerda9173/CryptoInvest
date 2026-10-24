@@ -285,3 +285,95 @@ class ControlEventRow(Base):
     operator: Mapped[str] = mapped_column(String(100))
     reason: Mapped[str] = mapped_column(Text)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConfigVersionRow(Base):
+    """Versoes da configuracao do robo, append-only (trigger no banco): ator, motivo, diff e hash encadeado.
+
+    `activation`: `immediate` (so reduz risco, aplicada ao robo em execucao) ou `next_start` (vale no
+    proximo (re)inicio com o robo sem posicao aberta). `chain_hash` encadeia a versao anterior (evidencia
+    de adulteracao).
+    """
+
+    __tablename__ = "config_versions"
+    __table_args__ = (
+        CheckConstraint("activation IN ('immediate', 'next_start')", name="ck_config_versions_activation"),
+        CheckConstraint("btrim(actor) <> '' AND btrim(reason) <> ''", name="ck_config_versions_identified"),
+        UniqueConstraint("parent_id", name="uq_config_versions_parent"),
+        # so UMA raiz: o UNIQUE(parent_id) nao vale para NULL (a 1a versao concorrente duplicaria a raiz)
+        Index(
+            "uq_config_versions_single_root",
+            text("(true)"),
+            unique=True,
+            postgresql_where=text("parent_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("config_versions.id", name="fk_config_versions_parent")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    actor: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text)
+    sections: Mapped[list[str]] = mapped_column(JSONB)
+    activation: Mapped[str] = mapped_column(String(12))
+    risk_increase: Mapped[bool] = mapped_column(Boolean)
+    document: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    diff: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    config_hash: Mapped[str] = mapped_column(String(64))
+    chain_hash: Mapped[str] = mapped_column(String(64))
+
+
+class ControlCommandRow(Base):
+    """Comandos do painel ao runner. Fila duravel: `pending_delivery` ate haver canal (Redis/arquivo)."""
+
+    __tablename__ = "control_commands"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending_delivery', 'delivered', 'applied', 'partially_applied', 'refused', "
+            "'discarded', 'expired', 'failed')",
+            name="ck_control_commands_state",
+        ),
+        Index("ix_control_commands_state", "state"),
+        Index("ix_control_commands_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(20))
+    operator: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text)
+    liquidate: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    state: Mapped[str] = mapped_column(String(20))
+    channel: Mapped[str | None] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class BacktestJobRow(Base):
+    """Backtests pedidos pelo painel; executados em subprocesso, com progresso e resultado gravados aqui."""
+
+    __tablename__ = "backtest_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
+            name="ck_backtest_jobs_status",
+        ),
+        Index("ix_backtest_jobs_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_by: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(10))
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    progress: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

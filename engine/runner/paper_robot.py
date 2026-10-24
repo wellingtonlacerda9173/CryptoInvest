@@ -8,7 +8,7 @@ persistido. Metodos com prefixo `_` assumem o lock tomado; os publicos o tomam.
 import asyncio
 import contextlib
 from collections import deque
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from pydantic import ValidationError
 
 from engine.application.backtest.models import EquityPoint
 from engine.application.risk import (
@@ -49,6 +50,7 @@ from engine.application.risk import (
 )
 from engine.application.risk.filters import RunMode, history_problem
 from engine.application.strategies import Strategy, StrategyContext, StrategySignal
+from engine.application.trading_config import Effect, risk_effect
 from engine.domain.candle import Candle
 from engine.domain.decision import DecisionAction
 from engine.domain.gateway import DuplicateOrderError, MarketDataGateway, UnknownOrderError
@@ -65,13 +67,23 @@ from engine.domain.journal import (
 )
 from engine.domain.market import OrderBookSnapshot
 from engine.domain.order import EntryOrder, ExitOrder, OrderReport, OrderStatus, OrderType
+from engine.domain.risk import RiskConfig
 from engine.domain.signal import Signal
 from engine.domain.trade import ExitReason, Trade
 from engine.infrastructure.backtest import Fill
 from engine.infrastructure.config.logging import scrub_text
+from engine.infrastructure.notifications import AlertDispatcher
 from engine.infrastructure.paper import Clock, PaperGateway, PaperHealth
+from engine.runner.command_channel import AuditSink, DiscardLimiter, Outcome, SignedCommandSource
 from engine.runner.paper_config import PaperRunConfig, RunPaths
-from engine.runner.paper_control import Command, CommandName, CommandQueue, write_status
+from engine.runner.paper_control import (
+    Command,
+    CommandName,
+    CommandQueue,
+    CommandResult,
+    CommandStatus,
+    write_status,
+)
 from engine.runner.paper_events import EventBus
 from engine.runner.paper_journal import Journal
 from engine.runner.paper_outbox import (
@@ -96,6 +108,7 @@ _CAPITAL_TOLERANCE = Decimal("0.000001")
 _BACKOFF_RESET_SECONDS = 60.0
 PERSISTENCE_PAUSE = "persistencia indisponivel: "
 _MAX_COMMAND_ATTEMPTS = 3
+_SIGNED_BLIND_ALERT_CYCLES = 5
 _MAX_PAUSE_REASONS = 20
 _EXIT_ID_ATTEMPTS = 3
 
@@ -167,6 +180,10 @@ class PaperRobot:
         liquidate_on_emergency: bool = False,
         quotes: Callable[[str], tuple[Decimal, Decimal] | None] | None = None,
         persist_retry_delays: Sequence[float] = DEFAULT_RETRY_DELAYS,
+        signed_commands: SignedCommandSource | None = None,
+        audit_sink: AuditSink | None = None,
+        alerts: AlertDispatcher | None = None,
+        config_source: Mapping[str, Any] | None = None,
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -182,6 +199,13 @@ class PaperRobot:
         self.calendar = calendar
         self.clock = clock
         self.commands = commands
+        self.signed_commands = signed_commands
+        self.audit_sink = audit_sink
+        self.alerts = alerts
+        self.config_source: dict[str, Any] | None = None if config_source is None else dict(config_source)
+        self._discards = DiscardLimiter()
+        self._signed_blind = 0
+        self._applied_version: int | None = None
         self.paths = paths
         self.code_version = code_version
         self.max_runtime = max_runtime
@@ -343,6 +367,7 @@ class PaperRobot:
             # estado atomico do diario e a recuperacao reprocessa as velas perdidas
             log.critical("paper_failed_no_state_save", run_id=self.run_id, open_positions=self.live_symbols)
             self._bot_state = BotState.STOPPED
+            await self._drain_alerts()
             await self.bus.close()
             return
         async with self._lock:
@@ -371,7 +396,12 @@ class PaperRobot:
             await self._publish_state("stop")
             self._write_status(now)
         log.info("paper_stopped", run_id=self.run_id, reason=reason, open_positions=self.live_symbols)
+        await self._drain_alerts()
         await self.bus.close()
+
+    async def _drain_alerts(self) -> None:
+        if self.alerts is not None:
+            await self.alerts.drain()
 
     # ------------------------------------------------------------------ alimentacao
 
@@ -464,7 +494,7 @@ class PaperRobot:
             if self._is_due("reconcile", now, self.config.reconcile_seconds):
                 await self._reconcile(now)
             if self._is_due("heartbeat", now, self.config.heartbeat_seconds):
-                await self._emit("heartbeat", {"state": self.bot_state.value, "equity": self._mtm_equity()})
+                await self._emit("heartbeat", self.status_payload(now))
                 self._write_status(now)
         if self.max_runtime is not None and now - self.started_at >= self.max_runtime:
             self.request_stop("tempo maximo de execucao atingido")
@@ -1280,6 +1310,8 @@ class PaperRobot:
         for entry in new.audit[len(previous.audit) :]:
             log.warning("risk_event", action=entry.action.value, detail=entry.detail, operator=entry.operator)
             await self._emit("risk", entry.model_dump(mode="json"))
+            if entry.action.value == "daily_loss_pause":
+                self._notify("daily_loss_pause", entry.detail)
         if new.halted and not previous.halted:
             return ControlEvent(
                 at=now,
@@ -1503,17 +1535,113 @@ class PaperRobot:
     # ------------------------------------------------------------------ comandos do operador
 
     async def _consume_commands(self, now: datetime) -> None:
-        if self.commands is None:
+        queue = self.commands
+        if queue is None:
             return
-        for path, command in self.commands.pending(now, not_before=self.started_at):
+        await self._pull_signed(now)
+        waiting = queue.signed_names()
+        for path, command in queue.pending(now, not_before=self.started_at):
             try:
                 async with self._lock:
-                    await self._execute(command, now)
+                    result = await self._execute(command, now)
             except Exception as error:
                 if not await self._command_failed(path, command, error):
                     raise
+                waiting.discard(path.name)
+                await self._send_ack(queue.signed_id(path.name), "failed", "falhou ao executar")
                 continue
-            self.commands.done(path)
+            if result.status is not CommandStatus.APPLIED:
+                log.warning("operator_command_result", status=result.status.value, detail=result.detail)
+            queue.done(path, result)
+            waiting.discard(path.name)
+            await self._send_ack(queue.signed_id(path.name), result.status.value, result.detail)
+        for name in sorted(waiting):
+            if not queue.exists(name):
+                # saiu da fila sem executar (expirou, foi rejeitado ou falhou 3 vezes): confirma o desfecho
+                state, detail = queue.outcome_of(name) or ("expired", "")
+                await self._send_ack(queue.signed_id(name), state, detail)
+
+    async def _pull_signed(self, now: datetime) -> None:
+        """Comandos assinados da API (Redis): so os verificados entram na fila local, onde valem TODAS as
+        protecoes de sempre (TTL, descarte pre-partida, resume nunca reativa HALTED, tentativas). Cada
+        envelope e tratado isoladamente: um veneno nunca faz perder os comandos legitimos do mesmo lote."""
+        source = self.signed_commands
+        if source is None or self.commands is None:
+            return
+        try:
+            outcomes = await source.poll(now)
+            self._signed_blind = int(getattr(source, "poll_failures", 0))
+        except Exception as error:
+            self._signed_blind += 1
+            log.error("signed_commands_failed", error=scrub_text(repr(error)))
+            outcomes = []
+        if self._signed_blind:
+            log.error("signed_commands_blind", cycles=self._signed_blind)
+            if self._signed_blind == _SIGNED_BLIND_ALERT_CYCLES:
+                await self._alert(
+                    "command_channel_blind",
+                    f"o canal de comandos falha ha {self._signed_blind} ciclos: Parar tudo pode nao chegar",
+                )
+        for outcome in outcomes:
+            try:
+                await self._intake(source, outcome, now)
+            except Exception as error:
+                # o envelope segue em `processing` e volta no proximo poll (at-least-once)
+                log.error("signed_command_intake_failed", error=scrub_text(repr(error)))
+        if (burst := self._discards.flush(now)) is not None:
+            log.error("paper_command_discard_burst", counts=burst)
+            await self._audit("paper_command_discard_burst", {"counts": burst, "total": sum(burst.values())})
+
+    async def _intake(self, source: SignedCommandSource, outcome: Outcome, now: datetime) -> None:
+        queue = self.commands
+        if queue is None:
+            return
+        if outcome.command is None:
+            code = outcome.discarded or "desconhecido"
+            if self._discards.admit(code, now):
+                log.error(
+                    "paper_command_discarded", command_id=outcome.command_id, code=code, digest=outcome.digest
+                )
+                await self._audit(
+                    "paper_command_discarded",
+                    {"command_id": outcome.command_id, "code": code, "digest": outcome.digest},
+                )
+            if outcome.command_id and outcome.authentic:
+                await source.ack(outcome.command_id, "discarded", code)
+            await source.release(outcome)
+            return
+        command_id = outcome.command_id
+        path = queue.path_for(outcome.command, command_id)
+        existed = path.exists() or queue.archived_in(path.name) is not None
+        if not existed:
+            queue.send(outcome.command, command_id)
+        if not await source.commit(outcome):
+            if not existed:
+                path.unlink(missing_ok=True)
+            if self._discards.admit("replay", now):
+                await self._audit(
+                    "paper_command_discarded",
+                    {"command_id": command_id, "code": "replay", "digest": outcome.digest},
+                )
+            return
+        if command_id:
+            await source.ack(command_id, "received")
+
+    async def _send_ack(self, command_id: str | None, result: str, detail: str = "") -> None:
+        if self.signed_commands is None or command_id is None:
+            return
+        try:
+            await self.signed_commands.ack(command_id, result, detail)
+        except Exception as error:
+            log.warning("signed_command_ack_failed", error=scrub_text(repr(error)))
+
+    async def _audit(self, action: str, payload: Mapping[str, Any]) -> None:
+        if self.audit_sink is None:
+            return
+        try:
+            await self.audit_sink.audit(SYSTEM, action, self.run_id, payload)
+        except Exception as error:
+            log.error("audit_sink_failed", action=action, error=scrub_text(repr(error)))
 
     async def _command_failed(self, path: Path, command: Command, error: Exception) -> bool:
         """Comando que falhou NAO e arquivado como processado: segue pendente, com alerta. Erro de
@@ -1537,7 +1665,8 @@ class PaperRobot:
         )
         return True
 
-    async def _execute(self, command: Command, now: datetime) -> None:
+    async def _execute(self, command: Command, now: datetime) -> CommandResult:
+        """Executa e DEVOLVE o resultado real: recusa nunca vira 'aplicado' (o painel e o `ack` refletem)."""
         reason = scrub_text(command.reason)
         audit = {
             "command_sha256": command.digest(),
@@ -1547,11 +1676,17 @@ class PaperRobot:
         log.warning("operator_command", command=command.name.value, operator=command.operator, reason=reason)
         match command.name:
             case CommandName.PAUSE:
-                await self._pause(reason, operator=command.operator, audit=audit)
+                fresh = await self._pause(reason, operator=command.operator, audit=audit)
+                return CommandResult.applied("" if fresh else "o robô já estava pausado por este motivo")
             case CommandName.RESUME:
-                if self.state.halted or not self.state.paused:
-                    log.error("resume_refused", halted=self.state.halted, paused=self.state.paused)
-                    return
+                if self.state.halted:
+                    log.error("resume_refused", halted=True, paused=self.state.paused)
+                    return CommandResult.refused(
+                        "o robô está desligado por drawdown; só a reativação manual o religa"
+                    )
+                if not self.state.paused:
+                    log.error("resume_refused", halted=False, paused=False)
+                    return CommandResult.refused("o robô não estava pausado")
                 self.state = self.state.resume(operator=command.operator, reason=reason, now=now)
                 self._pauses.clear()
                 await self.journal.record_control(
@@ -1566,7 +1701,7 @@ class PaperRobot:
             case CommandName.REACTIVATE:
                 if not self.state.halted:
                     log.error("reactivate_refused", reason="o robo nao esta desligado por drawdown")
-                    return
+                    return CommandResult.refused("o robô não está desligado por drawdown")
                 self.state = self.state.reactivate(operator=command.operator, reason=reason, now=now)
                 await self.journal.record_control(
                     ControlEvent(
@@ -1581,6 +1716,75 @@ class PaperRobot:
                 self.request_stop(f"{command.operator}: {reason}")
             case CommandName.EMERGENCY_STOP:
                 await self._emergency_stop(command, reason, now, audit)
+            case CommandName.APPLY_CONFIG:
+                return await self._apply_config(command, audit)
+        return CommandResult.applied()
+
+    async def _apply_config(self, command: Command, audit: dict[str, Any]) -> CommandResult:
+        """Aplica ao robo em execucao SO reducoes de risco, CAMPO A CAMPO: o que reduz (ou e igual) vale, o
+        que aumenta e recusado e fica para o proximo inicio. Campo desconhecido ou valor invalido recusa o
+        pacote todo (comando mal formado). O servidor nunca confia no remetente para relaxar limites."""
+        patch: Any = command.params.get("risk")
+        current = self.risk.model_dump(mode="json")
+        if not isinstance(patch, dict) or not patch:
+            return await self._config_refused(command, audit, "sem campos de risco")
+        if unknown := sorted(set(patch) - set(current)):
+            return await self._config_refused(command, audit, f"campos desconhecidos {unknown}")
+        try:
+            fresh = RiskConfig.model_validate({**current, **patch}).model_dump(mode="json")
+        except ValidationError as error:
+            detail = f"valores invalidos: {scrub_text(str(error.errors(include_input=False))[:200])}"
+            return await self._config_refused(command, audit, detail)
+        safe = (Effect.DECREASE, Effect.NEUTRAL)
+        kept = {n: patch[n] for n in patch if risk_effect(n, current[n], fresh[n]) in safe}
+        raised = sorted(set(patch) - set(kept))
+        try:
+            wanted = RiskConfig.model_validate({**current, **kept})
+        except ValidationError:
+            return await self._config_refused(
+                command, audit, "as reducoes isoladas deixariam a configuracao invalida"
+            )
+        changed = sorted(n for n in kept if current[n] != wanted.model_dump(mode="json")[n])
+        if raised:
+            reason = f"aumenta o risco, so vale no proximo inicio: {raised}"
+            await self._audit(
+                "config_apply_refused", {**audit, "operator": command.operator, "reason": reason}
+            )
+            await self._alert("config_refused", reason)
+            if not changed:
+                log.error("apply_config_refused", reason=reason)
+                return CommandResult.refused(reason)
+        if changed:
+            self.risk = wanted
+            self.config = self.config.model_copy(update={"risk": wanted})
+            self.context = StrategyContext(taker_fee_rate=wanted.taker_fee_rate)
+            log.warning("config_applied", fields=changed, operator=command.operator)
+            await self._audit(
+                "config_applied",
+                {
+                    **audit,
+                    "operator": command.operator,
+                    "fields": changed,
+                    "config_hash": self.config.config_hash(),
+                },
+            )
+        if raised:
+            await self._publish_state("config_applied")
+            return CommandResult.partial(
+                f"aplicado: {changed}; recusado (aumenta o risco, so no proximo inicio): {raised}"
+            )
+        version = command.params.get("version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            self._applied_version = version
+        if changed:
+            await self._publish_state("config_applied")
+        return CommandResult.applied("" if changed else "nada mudou: os valores ja estavam em vigor")
+
+    async def _config_refused(self, command: Command, audit: dict[str, Any], reason: str) -> CommandResult:
+        log.error("apply_config_refused", reason=reason)
+        await self._audit("config_apply_refused", {**audit, "operator": command.operator, "reason": reason})
+        await self._alert("config_refused", reason)
+        return CommandResult.refused(reason)
 
     async def _emergency_stop(
         self, command: Command, reason: str, now: datetime, audit: dict[str, Any]
@@ -1753,10 +1957,24 @@ class PaperRobot:
             "config": self.config.model_dump(mode="json"),
             "config_hash": self.config.config_hash(),
             "allow_open_calendar": self.config.allow_open_calendar,
+            "config_source": self.config_source,
         }
+
+    def _exposure(self) -> tuple[Decimal, dict[str, Decimal]]:
+        """Fracao do patrimonio comprada (total e por moeda), ao ultimo preco conhecido."""
+        equity = self._mtm_equity()
+        by_coin: dict[str, Decimal] = {}
+        for live in self._live.values():
+            if live.position is None or equity <= 0:
+                continue
+            price = self._marks.get(live.symbol) or live.position.entry_price
+            coin = live.symbol.split("/")[0]
+            by_coin[coin] = by_coin.get(coin, Decimal(0)) + live.position.quantity * price / equity
+        return sum(by_coin.values(), Decimal(0)), by_coin
 
     def status_payload(self, now: datetime) -> dict[str, Any]:
         state = self.state
+        exposure, by_coin = self._exposure()
         return {
             "run_id": self.run_id,
             "state": self.bot_state.value,
@@ -1775,6 +1993,10 @@ class PaperRobot:
             "drawdown": str(state.drawdown),
             "day": state.day.isoformat(),
             "day_pnl": str(state.day_pnl),
+            "day_start_equity": str(state.day_start_equity),
+            "loss_streaks": dict(state.loss_streaks),
+            "exposure": str(exposure),
+            "coin_exposure": {c: str(v) for c, v in by_coin.items()},
             "daily_pause_until": state.daily_pause_until.isoformat() if state.daily_pause_until else None,
             "target_reached_on": state.target_reached_on.isoformat() if state.target_reached_on else None,
             "pair_pause_until": {s: t.isoformat() for s, t in state.pair_pause_until.items()},
@@ -1783,6 +2005,10 @@ class PaperRobot:
             "last_candle": {s: t.isoformat() for s, t in self._last_handled.items()},
             "redis_healthy": self.bus.healthy,
             "allow_open_calendar": self.config.allow_open_calendar,
+            "config_hash": self.config.config_hash(),
+            "config_version": None if self.config_source is None else self.config_source.get("version_id"),
+            "applied_config_version": self._applied_version,
+            "risk": self.risk.model_dump(mode="json"),
             "outbox_pending": self.journal.pending_events,
             "persistence_error": self.journal.last_error if self.journal.down else None,
         }
@@ -1842,6 +2068,16 @@ class PaperRobot:
         message = scrub_text(message)
         log.error("ALERT", kind=kind, message=message)
         await self._emit("alerts", {"alert": kind, "message": message})
+        self._notify(kind, message)
+
+    def _notify(self, kind: str, message: str) -> None:
+        """Canal externo (Telegram/e-mail): agenda e volta; falha de notificacao nunca afeta o robo."""
+        if self.alerts is None:
+            return
+        try:
+            self.alerts.dispatch(kind, message)
+        except Exception as error:
+            log.warning("notification_dispatch_failed", error=type(error).__name__)
 
     async def _emit(self, kind: str, payload: dict[str, Any]) -> None:
         """Eventos sao best-effort: nenhuma falha do barramento pode parar o robo."""

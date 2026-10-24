@@ -99,6 +99,7 @@ def upgrade_database(url: URL, revision: str = "head") -> None:
 @dataclass(frozen=True, slots=True)
 class RoleSetup:
     app_url: URL
+    api_url: URL
     migrator_url: URL
 
 
@@ -124,25 +125,32 @@ def restricted_roles(settings: Settings, url: URL) -> Iterator[RoleSetup]:
     """
     database = assert_disposable_database(url)
     suffix = secrets.token_hex(4)
-    app_role, migrator_role = f"app_{suffix}_test", f"migrator_{suffix}_test"
-    app_password, migrator_password = secrets.token_urlsafe(18), secrets.token_urlsafe(18)
-    preamble = f"\\set app_role {app_role}\n\\set migrator_role {migrator_role}\n"
+    app_role, api_role = f"app_{suffix}_test", f"api_{suffix}_test"
+    migrator_role = f"migrator_{suffix}_test"
+    app_password, api_password = secrets.token_urlsafe(18), secrets.token_urlsafe(18)
+    migrator_password = secrets.token_urlsafe(18)
+    preamble = f"\\set app_role {app_role}\n\\set api_role {api_role}\n\\set migrator_role {migrator_role}\n"
     try:
         run_psql(
             settings,
             database,
             preamble + ROLES_SCRIPT.read_text(encoding="utf-8"),
             CRYPTOINVEST_APP_PASSWORD=app_password,
+            CRYPTOINVEST_API_PASSWORD=api_password,
             CRYPTOINVEST_MIGRATOR_PASSWORD=migrator_password,
         )
         yield RoleSetup(
             app_url=url.set(username=app_role, password=app_password),
+            api_url=url.set(username=api_role, password=api_password),
             migrator_url=url.set(username=migrator_role, password=migrator_password),
         )
     finally:
         asyncio.run(_execute_admin(settings, f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
         asyncio.run(
             _execute_admin(
-                settings, f'DROP ROLE IF EXISTS "{app_role}"', f'DROP ROLE IF EXISTS "{migrator_role}"'
+                settings,
+                f'DROP ROLE IF EXISTS "{app_role}"',
+                f'DROP ROLE IF EXISTS "{api_role}"',
+                f'DROP ROLE IF EXISTS "{migrator_role}"',
             )
         )

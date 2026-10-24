@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controle - CryptoInvest (protótipo)</title>
+<link rel="stylesheet" href="mockup.css">
+<script>
+(function(){var q=new URLSearchParams(location.search).get('tema');var t=null;
+try{t=q||localStorage.getItem('tema');}catch(e){t=q}
+if(t==='claro'||t==='light'){document.documentElement.setAttribute('data-theme','light');}
+window.alternarTema=function(){var l=document.documentElement.getAttribute('data-theme')==='light';
+document.documentElement.setAttribute('data-theme',l?'dark':'light');try{localStorage.setItem('tema',l?'escuro':'claro')}catch(e){}};})();
+</script>
+</head>
+<body data-modo="paper">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+<symbol id="i-ctl" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+<symbol id="i-mkt" viewBox="0 0 24 24"><path d="M7 4v16M17 4v16"/><rect x="5" y="8" width="4" height="7"/><rect x="15" y="6" width="4" height="9"/></symbol>
+<symbol id="i-dec" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></symbol>
+<symbol id="i-ops" viewBox="0 0 24 24"><path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+<symbol id="i-perf" viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 4 3 5-8"/></symbol>
+<symbol id="i-bt" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+<symbol id="i-cfg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14A8 8 0 0110 4a8 8 0 1010 10z"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 12l6-6 6 6"/></symbol>
+<symbol id="i-dn" viewBox="0 0 24 24"><path d="M12 5v13M6 12l6 6 6-6"/></symbol>
+<symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9.5c0-1 1.3-1.5 3-1.5s3 .6 3 1.7c0 2.3-6 1.1-6 3.6 0 1.1 1.3 1.7 3 1.7s3-.6 3-1.5M12 6v2M12 16v2"/></symbol>
+<symbol id="i-collapse" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M16 10l-3 2 3 2"/></symbol>
+</defs></svg>
+<a class="sr-only" href="#conteudo">Pular para o conteúdo</a>
+<div class="app">
+<aside class="side"><div class="side__in">
+<div class="brand"><div class="brand__logo" aria-hidden="true">C</div><span>CryptoInvest</span></div>
+<nav class="nav" aria-label="Principal">
+<a href="dashboard.html"><svg class="ico " aria-hidden="true"><use href="#i-dash"/></svg><span>Dashboard</span></a>
+<a href="controle.html" aria-current="page"><svg class="ico " aria-hidden="true"><use href="#i-ctl"/></svg><span>Controle</span><span class="badge-count" title="1 alerta">1</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-mkt"/></svg><span>Mercado</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-dec"/></svg><span>Decisões ao vivo</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-ops"/></svg><span>Operações</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-perf"/></svg><span>Desempenho</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-bt"/></svg><span>Backtest</span></a>
+<a href="#"><svg class="ico " aria-hidden="true"><use href="#i-cfg"/></svg><span>Configurações</span></a>
+</nav>
+<div class="side__foot"><button class="collapse" type="button" aria-label="Recolher menu"><svg class="ico " aria-hidden="true"><use href="#i-collapse"/></svg><span>Recolher menu</span></button></div>
+</aside>
+<header class="top" role="banner">
+<div class="status status--ok" role="status" aria-live="polite"><span class="status__dot"></span><span>Operando</span><span class="status__sub">aguardando sinal</span></div>
+<span class="mode mode--paper"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-coin"/></svg>PAPER <small>simulado</small></span>
+<div class="top__spacer"></div>
+<div class="top__money">
+<div class="metric"><span class="metric__label">Saldo (simulado)</span><span class="metric__value num">10.184,32 <small class="mut">USDT</small></span></div>
+<div class="metric"><span class="metric__label">Resultado do dia</span><span class="metric__value num neg"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-dn"/></svg> −30,56 <small>(−0,30%)</small></span></div>
+</div>
+<button class="btn btn--danger btn-stop" type="button" aria-haspopup="dialog"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-stop"/></svg><span>Parar <span class="lbl-long">tudo</span></span></button>
+</header>
+<main class="main" id="conteudo">
+<div class="page-head"><div><h1 class="page-title">Controle do robô</h1><p>Ligar, pausar, parar e entender por que o robô faz o que faz.</p></div>
+<button class="theme-toggle" type="button" onclick="alternarTema()" aria-label="Alternar entre tema escuro e claro"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-moon"/></svg><span>Tema escuro / claro</span></button></div>
+<div class="example-banner" role="note"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-info"/></svg><span><strong>EXEMPLO</strong> - todos os números desta tela são fictícios, só para avaliar o desenho. Nada aqui é real nem foi calculado pelo robô.</span></div>
+<section class="hero" aria-labelledby="hero-t">
+<div class="hero__icon"><svg class="ico " aria-hidden="true"><use href="#i-check"/></svg></div>
+<div><h2 class="hero__title" id="hero-t">Operando normalmente, sem pausas nem travas ativas.</h2>
+<p class="hero__text">Ligado desde 18/10 às 09:12 (run <span class="num">paper-20261018-091200</span>). Última conferência com a corretora simulada: há 2 min. <span>Posições abertas continuam protegidas por stop em qualquer parada.</span></p></div>
+</section>
+
+<section class="grid grid--eq">
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-ctl"/></svg> Liga / desliga</h2><span class="mode mode--paper">PAPER</span></div>
+<label class="toggle" role="switch" aria-checked="true" tabindex="0"><span class="toggle__track"></span><span>Robô ligado <span class="toggle__state">Desligar para de abrir novas operações; posições abertas seguem protegidas.</span></span></label>
+<div class="pill-row"><button class="btn" type="button"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-pause"/></svg> Pausar novas entradas</button><button class="btn btn--ghost" type="button" disabled>Retomar (nada pausado)</button></div>
+<div class="card__head" style="margin-top:6px"><h3 class="card__title">Pausas ativas</h3></div>
+<div class="empty"><svg class="ico " aria-hidden="true"><use href="#i-check"/></svg><strong>Nenhuma pausa ativa</strong><span>Quando houver, o motivo e quem pausou aparecem aqui.</span></div>
+</div>
+
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-shield"/></svg> Saúde da conexão</h2><span class="chip chip--ok"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Tudo ok</span></div>
+<div class="health">
+<div><span class="mut">Dados de mercado</span><b class="pos"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Recebendo (há 3 s)</b></div>
+<div><span class="mut"><abbr class="term" tabindex="0" title="Stops cegos: o robô ficou sem dados de mercado enquanto há posição aberta. Ele pausa novas entradas e tenta reconectar.">Stops cegos</abbr></span><b class="pos"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Não</b></div>
+<div><span class="mut">Gravação no banco</span><b class="pos"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Em dia (0 na fila)</b></div>
+<div><span class="mut">Batimento do robô</span><b class="pos"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> há 12 s</b></div>
+<div><span class="mut">Calendário de eventos</span><b class="attn"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-warn"/></svg> Aberto (sem cobertura)</b></div>
+<div><span class="mut">Conferência de posições</span><b class="pos"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg> Sem divergência</b></div>
+</div></div>
+</section>
+
+<section class="grid grid--eq">
+<div class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-shield"/></svg> Travas de risco</h2><a class="card__hint" href="#">Ajustar em Configurações</a></div>
+<div class="limits"><div class="limit limit--ok" role="group" aria-label="Perda diária: 0,3% de 1%. Folgado">
+<div class="limit__row"><span class="limit__name"><abbr class="term" tabindex="0" title="Perda diária: quanto o saldo caiu hoje. Ao chegar no limite, o robô não abre novas operações até a meia-noite (UTC).">Perda diária</abbr></span><span class="limit__val num">0,3% de 1%</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="30" aria-label="Perda diária"><div class="limit__fill" style="width:30%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Folgado</span><span class="limit__note">se chegar a 1%, o robô para de abrir operações até 00:00 UTC</span></div></div><div class="limit limit--ok" role="group" aria-label="Drawdown: 1,8% de 5%. Folgado">
+<div class="limit__row"><span class="limit__name"><abbr class="term" tabindex="0" title="Drawdown: queda desde o ponto mais alto do saldo. É a medida mais honesta de risco.">Drawdown</abbr></span><span class="limit__val num">1,8% de 5%</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="36" aria-label="Drawdown"><div class="limit__fill" style="width:36%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Folgado</span><span class="limit__note">se chegar a 5%, o robô desliga e só você religa</span></div></div><div class="limit limit--warn" role="group" aria-label="Perdas seguidas (ETH/USDT): 1 de 2. Atenção: 1 perda a menos do limite">
+<div class="limit__row"><span class="limit__name">Perdas seguidas (ETH/USDT)</span><span class="limit__val num">1 de 2</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="Perdas seguidas (ETH/USDT)"><div class="limit__fill" style="width:50%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-warn"/></svg>Atenção: 1 perda a menos do limite</span><span class="limit__note">com 2 seguidas o par pausa por 24 h</span></div></div><div class="limit limit--ok" role="group" aria-label="Posições abertas: 1 de 2. Normal">
+<div class="limit__row"><span class="limit__name">Posições abertas</span><span class="limit__val num">1 de 2</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="Posições abertas"><div class="limit__fill" style="width:50%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Normal</span><span class="limit__note">máximo de 2 ao mesmo tempo</span></div></div><div class="limit limit--ok" role="group" aria-label="Exposição total: 24% de 50%. Normal">
+<div class="limit__row"><span class="limit__name">Exposição total</span><span class="limit__val num">24% de 50%</span></div>
+<div class="limit__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="48" aria-label="Exposição total"><div class="limit__fill" style="width:48%"></div></div>
+<div class="limit__row"><span class="limit__state"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-check"/></svg>Normal</span><span class="limit__note">parte do saldo que está comprada</span></div></div></div></div>
+
+<div class="card danger-zone"><div class="card__head"><h2 class="card__title neg"><svg class="ico " aria-hidden="true"><use href="#i-stop"/></svg> Parar tudo (emergência)</h2></div>
+<p>Use quando algo estiver errado. Bloqueia novas operações na hora. Você escolhe o que fazer com o que está aberto:</p>
+<div class="dialog" role="dialog" aria-labelledby="dlg-t" aria-describedby="dlg-d" style="max-width:none">
+<h3 id="dlg-t"><svg class="ico " aria-hidden="true"><use href="#i-warn"/></svg> Parar tudo agora?</h3>
+<p id="dlg-d" class="mut">Isto vale para o modo <span class="mode mode--paper" style="min-height:24px">PAPER simulado</span>. Nenhum dinheiro real será mexido.</p>
+<div class="radio" data-on><i></i><div><strong>Só bloquear novas operações</strong><span>Mantém a posição aberta, com stop ativo. Recomendado.</span></div></div>
+<div class="radio"><i></i><div><strong>Bloquear e vender tudo a mercado</strong><span>Fecha BTC/USDT agora. Pode ter perda por preço pior.</span></div></div>
+<div class="field"><label for="op">Seu nome (fica no registro)</label><input id="op" value="ana" autocomplete="off"></div>
+<div class="field"><label for="mt">Motivo</label><input id="mt" value="Notícia inesperada" autocomplete="off"></div>
+<div class="dialog__actions"><button class="btn btn--danger" type="button"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-stop"/></svg> Confirmar: parar tudo</button><button class="btn" type="button">Voltar (Esc)</button></div>
+<span class="mut" style="font-size:12px">Exemplo do diálogo aberto. Na tela real ele só aparece após clicar em Parar tudo.</span></div>
+</div>
+</section>
+
+<section class="card"><div class="card__head"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-lock"/></svg> Trava do Live (dinheiro real)</h2><span class="chip chip--bad"><svg class="ico ico--sm" aria-hidden="true"><use href="#i-lock"/></svg> Bloqueado</span></div>
+<div class="inelig" role="alert"><svg class="ico " aria-hidden="true"><use href="#i-warn"/></svg><div><strong>Run inelegível para o Live (calendário aberto)</strong><span>Nenhum desempenho compensa um teste feito sem a proteção do calendário de eventos. Inicie um novo teste no Paper com o calendário ligado.</span></div></div>
+<ul class="crit" aria-label="Critérios para liberar o Live">
+<li><svg class="ico no" aria-hidden="true"><use href="#i-bt"/></svg><span>Pelo menos 60 dias de teste no Paper</span><span class="crit__val">23 de 60</span></li>
+<li><svg class="ico ok" aria-hidden="true"><use href="#i-check"/></svg><span>Drawdown máximo abaixo de 5%</span><span class="crit__val pos">1,8%</span></li>
+<li><svg class="ico bad" aria-hidden="true"><use href="#i-x"/></svg><span>Profit factor acima de 1,5</span><span class="crit__val neg">1,34</span></li>
+<li><svg class="ico no" aria-hidden="true"><use href="#i-bt"/></svg><span>Pelo menos 30 operações</span><span class="crit__val">17 de 30</span></li>
+<li><svg class="ico ok" aria-hidden="true"><use href="#i-check"/></svg><span>Pelo menos 5 perdas na amostra (sem perdas, não dá para medir o risco)</span><span class="crit__val pos">6 de 5</span></li>
+<li><svg class="ico bad" aria-hidden="true"><use href="#i-x"/></svg><span>Run elegível (calendário de eventos ligado o tempo todo)</span><span class="crit__val neg">Inelegível</span></li>
+</ul>
+<div class="field"><label for="frase">Para liberar, digite exatamente: <strong>OPERAR COM DINHEIRO REAL</strong></label><input id="frase" disabled placeholder="Bloqueado até todos os critérios serem cumpridos" aria-describedby="frase-h"><span class="help" id="frase-h">Você também precisará do código do app autenticador (2FA).</span></div>
+<div><button class="btn" type="button" disabled><svg class="ico ico--sm" aria-hidden="true"><use href="#i-lock"/></svg> Liberar Live</button></div></section>
+
+<section class="grid grid--eq">
+<div class="card"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-dec"/></svg> Os estados do robô, em palavras simples</h2>
+<div class="table-wrap"><table class="state-table"><thead><tr><th>Estado</th><th>O que significa</th><th>O que fazer</th></tr></thead><tbody><tr><td><span class="chip chip--ok">Operando</span><div class="mut" style="font-size:12px;margin-top:4px">RUNNING</div></td><td>Procurando oportunidades e gerenciando posições.</td><td>Nada. Acompanhe.</td></tr><tr><td><span class="chip chip--warn">Pausado</span><div class="mut" style="font-size:12px;margin-top:4px">PAUSED</div></td><td>Não abre novas operações. As posições abertas continuam protegidas pelo stop. Motivos possíveis: perda diária, divergência na conferência, você pausou.</td><td>Leia o motivo. Retome em Controle (informa seu nome e o porquê).</td></tr><tr><td><span class="chip chip--bad">Desligado por drawdown</span><div class="mut" style="font-size:12px;margin-top:4px">HALTED</div></td><td>A queda chegou a 5%. O robô não opera mais sozinho, de propósito.</td><td>Revise o que aconteceu e use Reativar (nome e motivo obrigatórios).</td></tr><tr><td><span class="chip chip--bad">Falha ao gravar</span><div class="mut" style="font-size:12px;margin-top:4px">FAILED_PERSISTENCE</div></td><td>O banco de dados saiu do ar. Nada é perdido: ficam guardados no disco. Novas entradas ficam bloqueadas e os stops seguem ativos.</td><td>Normalmente volta sozinho. Se passar de 5 min, chame o suporte.</td></tr><tr><td><span class="chip chip--off">Parado</span><div class="mut" style="font-size:12px;margin-top:4px">STOPPED</div></td><td>Encerrado de forma ordenada. Sem novas entradas.</td><td>Inicie de novo quando quiser.</td></tr></tbody></table></div></div>
+<div class="card"><h2 class="card__title"><svg class="ico " aria-hidden="true"><use href="#i-bt"/></svg> Histórico de controle</h2>
+<ol class="timeline">
+<li class="t-ok"><time>18/10 09:12</time><details><summary>Robô iniciado no Paper</summary><p>Operador: ana. Motivo: início do teste. Calendário de eventos: aberto (avisado).</p></details></li>
+<li class="t-warn"><time>19/10 16:40</time><details><summary>Pausa por divergência na conferência</summary><p>Quantidade na corretora simulada diferente da registrada. Pausou sozinho; retomado por ana: “conferido, sem erro”.</p></details></li>
+<li class="t-warn"><time>20/10 00:00</time><details><summary>Novo dia: travas diárias zeradas</summary><p>Perda diária e meta do dia voltam a 0% (meia-noite UTC).</p></details></li>
+<li class="t-ok"><time>20/10 11:05</time><details open><summary>Stop de ETH/USDT executado (−0,5 R)</summary><p>Perda dentro do risco aprovado. Perdas seguidas em ETH/USDT: 1 de 2.</p></details></li>
+</ol></div>
+</section>
+</main>
+</div>
+<nav class="bottomnav" aria-label="Principal"><a href="dashboard.html"><svg class="ico " aria-hidden="true"><use href="#i-dash"/></svg><span>Início</span></a><a href="controle.html" aria-current="page"><svg class="ico " aria-hidden="true"><use href="#i-ctl"/></svg><span>Controle</span></a><a href="#"><svg class="ico " aria-hidden="true"><use href="#i-ops"/></svg><span>Operações</span></a><a href="#"><svg class="ico " aria-hidden="true"><use href="#i-perf"/></svg><span>Desempenho</span></a><a href="#"><svg class="ico " aria-hidden="true"><use href="#i-cfg"/></svg><span>Mais</span></a></nav>
+</body></html>

@@ -12,7 +12,8 @@ Fase 1: monorepo, dominio, dados de mercado da Binance (sem chave) e persistenci
 | `engine/application` | Detectores, indicadores, estrategias, gestao de risco e `backtest` (motor, metricas, walk-forward, relatorios) |
 | `engine/runner` | Pontos de entrada: `python -m engine.runner.backtest` (CLI do backtest), `python -m engine.runner.paper` (runner do paper) e carga de velas |
 | `engine/infrastructure` | Cliente Binance (REST paginado + WebSocket), persistencia SQLAlchemy/Alembic, configuracao |
-| `api`, `web` | Placeholders |
+| `api` | API do painel (FastAPI): autenticacao 2FA, auditoria, usuarios, chaves e contrato OpenAPI (ver `api/README.md`) |
+| `web` | Painel (em construcao) |
 | `tests/unit`, `tests/integration` | Testes (integracao marcada com `integration`) |
 
 ## Pre-requisitos

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR" class="dark" style="color-scheme: dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="robots" content="noindex" />
+    <title>CryptoInvest</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      html.dark {
+        background: #0b0f14;
+      }
+      html:not(.dark) {
+        background: #f3f5f8;
+      }
+    </style>
+    <script>
+      (function () {
+        var t = 'dark';
+        try {
+          var s = localStorage.getItem('ci-theme');
+          if (s === 'light' || s === 'dark') t = s;
+        } catch (e) {}
+        var d = document.documentElement;
+        d.classList.toggle('dark', t === 'dark');
+        d.style.colorScheme = t;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
