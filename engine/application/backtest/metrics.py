@@ -74,11 +74,15 @@ STATE_LOCK_CODES = frozenset(
     {"robot_halted", "paused", "daily_loss_pause", "daily_target_reached", "pair_paused"}
 )
 HALT_CODE = "robot_halted"
+# veto do seletor de estrategias (opt-in): mede o valor do seletor, nao dos filtros de risco
+SELECTOR_CODES = frozenset({"selector_veto"})
 
 
 def veto_kind(code: str) -> str:
     if code in CAPACITY_CODES:
         return "capacity"
+    if code in SELECTOR_CODES:
+        return "selector"
     return "state_lock" if code in STATE_LOCK_CODES else "filter"
 
 

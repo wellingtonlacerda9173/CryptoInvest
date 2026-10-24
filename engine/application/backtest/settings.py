@@ -27,12 +27,21 @@ def default_rules(symbol: str) -> SymbolRules:
     )
 
 
+class _NoDrawdownHaltRisk(RiskConfig):
+    """So para o `RiskState` do backtest de validacao: o teto de `max_drawdown` sobe para 100% (so o capital
+    zerado desliga). Nao e alcancavel pelo RiskConfig de producao/API, que segue limitado a 5%."""
+
+    max_drawdown: StrictDecimal = Field(default=Decimal(1), gt=0, le=1)
+
+
 class BacktestSettings(DomainModel):
     """Parametros do backtest. A taxa taker vive em `risk.taker_fee_rate` (fonte unica de gate, estrategia
     e gateway).
 
     `history_window` limita as velas entregues a estrategia e ao gate (a janela que o Paper/Live manteria);
     `hypothetical_horizon` e o limite de tempo (em velas) da simulacao das operacoes evitadas.
+    `drawdown_halt=False` (so a coleta de amostras da validacao) tira o halt permanente por drawdown do
+    estado de risco; todas as demais regras do gate continuam valendo.
     """
 
     initial_capital: Volume = Decimal(10_000)
@@ -42,6 +51,13 @@ class BacktestSettings(DomainModel):
     risk: RiskConfig = RiskConfig()
     history_window: int = Field(default=400, ge=60)
     hypothetical_horizon: int = Field(default=72, ge=1)
+    drawdown_halt: bool = True
+
+    def state_risk(self) -> RiskConfig:
+        """Config lida pelo `RiskState` (halt por drawdown); o gate e o sizing seguem em `risk`."""
+        if self.drawdown_halt:
+            return self.risk
+        return _NoDrawdownHaltRisk.model_validate({**self.risk.model_dump(), "max_drawdown": Decimal(1)})
 
     def gateway_config(self) -> BacktestConfig:
         return BacktestConfig(

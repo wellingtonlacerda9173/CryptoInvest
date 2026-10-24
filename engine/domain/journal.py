@@ -156,6 +156,8 @@ class DecisionEntry(DomainModel):
     signal_id: str | None = Field(default=None, max_length=64)
     client_order_id: str | None = Field(default=None, max_length=CLIENT_ORDER_ID_MAX)
     signal: Signal | None = None
+    # parecer extra (regime, scores, ai_opinion) gravado junto do sinal em `decisions.signal` (JSON livre)
+    insight: dict[str, Any] | None = None
     context: dict[str, Any] = Field(default_factory=dict)
 
     def decision_key(self, run_id: str) -> str:

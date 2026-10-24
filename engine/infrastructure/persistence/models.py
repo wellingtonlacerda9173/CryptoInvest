@@ -265,6 +265,41 @@ class EquitySnapshotRow(Base):
     in_position: Mapped[bool] = mapped_column(Boolean)
 
 
+class StrategyScoreRow(Base):
+    """Snapshots de scores do seletor, append-only (trigger); o robo le o ultimo por par e timeframe."""
+
+    __tablename__ = "strategy_scores"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_id",
+            "strategy",
+            "regime",
+            "symbol",
+            "timeframe",
+            name="uq_strategy_scores_snapshot_key",
+        ),
+        CheckConstraint("origin IN ('backtest', 'paper', 'live')", name="ck_strategy_scores_origin"),
+        CheckConstraint("sample_size >= 0", name="ck_strategy_scores_sample"),
+        Index("ix_strategy_scores_latest", "timeframe", "symbol", text("calculated_at DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(String(64))
+    strategy: Mapped[str] = mapped_column(String(100))
+    regime: Mapped[str] = mapped_column(String(30))
+    symbol: Mapped[str] = mapped_column(String(25))
+    timeframe: Mapped[str] = mapped_column(String(5))
+    sample_size: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column(Float)
+    eligible: Mapped[bool] = mapped_column(Boolean)
+    ineligible_reason: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    origin: Mapped[str] = mapped_column(String(10))
+    run_id: Mapped[str | None] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ControlEventRow(Base):
     """Acoes de controle (ligar/desligar/pausar/reativar), append-only (trigger no banco)."""
 

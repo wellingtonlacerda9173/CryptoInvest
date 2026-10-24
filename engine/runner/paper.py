@@ -20,6 +20,8 @@ from sqlalchemy import text
 
 from engine.application.backtest import default_rules
 from engine.application.risk import EventCalendar, SymbolRules
+from engine.application.selector import SelectorSettings
+from engine.application.strategies.registry import STRATEGY_REGISTRY
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Timeframe
 from engine.infrastructure.binance.market_data import BinanceMarketData
@@ -60,6 +62,7 @@ from engine.runner.paper_report import build_cumulative, build_daily, write_repo
 from engine.runner.paper_report_data import UnknownRunError, collect_inputs
 from engine.runner.paper_robot import PaperRobot
 from engine.runner.paper_versioned import apply_versioned_config
+from engine.runner.selector_store import DEFAULT_SAMPLES_DIR, SqlScoreStore, read_samples, samples_path
 
 log = structlog.get_logger()
 
@@ -102,6 +105,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--duration-minutes", type=float, help="encerra sozinho apos este tempo (smoke/testes)"
     )
     start.add_argument("--emergency-liquidate", action="store_true", help="emergency-stop sempre liquida")
+    start.add_argument(
+        "--selector",
+        action="store_true",
+        help="liga o seletor por regime (padrao: desligado); sem scores salvos o robo nao opera",
+    )
+    start.add_argument("--selector-recalc-hours", type=int, default=6)
+    start.add_argument(
+        "--selector-samples-dir",
+        type=Path,
+        default=DEFAULT_SAMPLES_DIR,
+        help="amostras de backtest importadas no recalculo (geradas por validate --publish-scores)",
+    )
     start.add_argument("--no-redis", action="store_true")
     start.add_argument(
         "--no-versioned-config",
@@ -176,6 +191,7 @@ def build_config(args: argparse.Namespace) -> PaperRunConfig:
         heartbeat_seconds=args.heartbeat_seconds,
         equity_seconds=args.equity_seconds,
         reconcile_seconds=max(1, round(args.reconcile_minutes * 60)),
+        selector=SelectorSettings(enabled=args.selector, recalc_hours=args.selector_recalc_hours),
     )
 
 
@@ -233,6 +249,11 @@ async def run_start(args: argparse.Namespace) -> int:
         await db_engine.dispose()
         return EXIT_FATAL
     config = versioned.config
+    strategies = versioned.strategies or build_strategies(config.strategies, config.params)
+    if config.selector.enabled:
+        names = [n for n in config.strategies if n in STRATEGY_REGISTRY] or list(STRATEGY_REGISTRY)
+        config = config.model_copy(update={"strategies": tuple(names)})
+        strategies = [STRATEGY_REGISTRY[n]() for n in names]
     paths.config.write_text(config.model_dump_json(indent=2), encoding="utf-8")
     robot = PaperRobot(
         config,
@@ -240,7 +261,13 @@ async def run_start(args: argparse.Namespace) -> int:
         journal=SqlJournal(sessions, run_id),
         bus=bus,
         market=market,
-        strategies=versioned.strategies or build_strategies(config.strategies, config.params),
+        strategies=strategies,
+        score_store=SqlScoreStore(sessions) if config.selector.enabled else None,
+        backtest_samples=(
+            read_samples(samples_path(args.selector_samples_dir, config.timeframe.value))
+            if config.selector.enabled
+            else ()
+        ),
         signed_commands=signed,
         audit_sink=SqlAuditSink(sessions),
         alerts=AlertDispatcher(

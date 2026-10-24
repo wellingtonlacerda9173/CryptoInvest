@@ -9,6 +9,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
+from engine.application.selector import SelectorSettings
 from engine.domain.base import DomainModel
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Fee, StrictDecimal, Symbol, Timeframe, Volume
@@ -41,6 +42,7 @@ class PaperRunConfig(DomainModel):
     latency_ms: int = Field(default=100, ge=0)
     max_stop_blind_seconds: int = Field(default=30, gt=0)
     max_book_age_seconds: int = Field(default=10, gt=0)
+    selector: SelectorSettings = SelectorSettings()
 
     allow_open_calendar: bool = False
     history_window: int = Field(default=400, ge=60)
@@ -94,6 +96,9 @@ class PaperRunConfig(DomainModel):
                 "max_book_age_seconds",
             },
         )
+        if self.selector.enabled:
+            # desligado (padrao) nao entra no hash: o hash dos runs existentes nao muda
+            fields["selector"] = self.selector.model_dump(mode="json")
         if self.document_hash is not None:
             fields["document_hash"] = self.document_hash
         return fields

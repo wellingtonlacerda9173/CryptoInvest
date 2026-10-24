@@ -21,11 +21,42 @@ CONFLUENCE_FAMILIES: Final[Mapping[str, Family]] = {
     "rsi_em_zona_de_forca": Family.MOMENTUM,
     "sem_exaustao": Family.STRUCTURE,
     "fechamento_acima_da_maxima_recente": Family.STRUCTURE,
+    "apoio_em_suporte_confirmado": Family.STRUCTURE,
+    "estrutura_de_alta_preservada": Family.STRUCTURE,
+    "candle_de_reversao_de_alta": Family.STRUCTURE,
+    "rompimento_sem_exaustao": Family.STRUCTURE,
+    "range_testado_na_resistencia": Family.STRUCTURE,
+    "rsi_saindo_de_sobrevenda": Family.MOMENTUM,
+    "histograma_macd_subindo": Family.MOMENTUM,
 }
 
 # Pre-requisitos obrigatorios do setup: nao sao confluencias e nunca entram na contagem.
 TRIGGERS: Final = frozenset(
-    {"barra_elefante_alta", "rompimento_de_resistencia", "cruzamento_ema_para_cima", "adx_em_tendencia"}
+    {
+        "barra_elefante_alta",
+        "rompimento_de_resistencia",
+        "cruzamento_ema_para_cima",
+        "adx_em_tendencia",
+        "engolfo_de_alta",
+        "pin_bar_de_alta",
+        "queda_previa",
+        "reteste_de_nivel_confirmado",
+        "rejeicao_de_alta_no_nivel",
+        "supertrend_virou_para_alta",
+        "rompimento_do_canal_de_donchian",
+        "rompimento_de_range_lateral",
+        "range_lateral_valido",
+        "volume_no_rompimento",
+        "regime_lateral_adx_baixo",
+        "retorno_para_dentro_da_banda_inferior",
+        "rsi_sobrevendido",
+        "cruzamento_macd_para_cima",
+        "divergencia_de_alta_do_rsi",
+        "confirmacao_do_pivo_a_direita",
+        "reclaim_do_vwap",
+        "rejeicao_no_vwap",
+        "sessao_com_amostra_minima",
+    }
 )
 
 

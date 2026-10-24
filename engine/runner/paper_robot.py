@@ -21,6 +21,7 @@ import structlog
 from pydantic import ValidationError
 
 from engine.application.backtest.models import EquityPoint
+from engine.application.regime import classify_regime
 from engine.application.risk import (
     AccountSnapshot,
     ApprovedEntry,
@@ -49,6 +50,16 @@ from engine.application.risk import (
     rolling_quote_volume,
 )
 from engine.application.risk.filters import RunMode, history_problem
+from engine.application.selector import (
+    SELECTOR_IDLE,
+    SELECTOR_NO_SCORES,
+    ScoreKey,
+    StrategyScore,
+    TradeSample,
+    build_scores,
+    select_for_reading,
+    selection_insight,
+)
 from engine.application.strategies import Strategy, StrategyContext, StrategySignal
 from engine.application.trading_config import Effect, risk_effect
 from engine.domain.candle import Candle
@@ -94,6 +105,7 @@ from engine.runner.paper_outbox import (
     is_transient,
 )
 from engine.runner.paper_state import LiveSnapshot, PauseEntry, RunnerSnapshot, decode_blob, encode_blob
+from engine.runner.selector_store import ScoreStore
 
 log = structlog.get_logger()
 
@@ -184,6 +196,8 @@ class PaperRobot:
         audit_sink: AuditSink | None = None,
         alerts: AlertDispatcher | None = None,
         config_source: Mapping[str, Any] | None = None,
+        score_store: ScoreStore | None = None,
+        backtest_samples: Sequence[TradeSample] = (),
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -239,6 +253,9 @@ class PaperRobot:
         self._calendar_open_warned = False
         self._tasks: list[asyncio.Task[None]] = []
         self._quotes = quotes or self._gateway_quotes
+        self._score_store = score_store
+        self._backtest_samples = tuple(backtest_samples)
+        self._scores: dict[ScoreKey, StrategyScore] = {}
 
     # ------------------------------------------------------------------ ciclo de vida
 
@@ -326,8 +343,9 @@ class PaperRobot:
             await self._place_exits()
             await self._reconcile(self.clock.now(), startup=True)
             await self._save_state(self.clock.now())
+        await self._load_scores()
         self._bot_state = BotState.RUNNING
-        self._due = {}
+        self._due = {"scores": now}
         await self._publish_state("start")
 
     async def run(self) -> None:
@@ -496,6 +514,10 @@ class PaperRobot:
             if self._is_due("heartbeat", now, self.config.heartbeat_seconds):
                 await self._emit("heartbeat", self.status_payload(now))
                 self._write_status(now)
+        if self.config.selector.enabled and self._is_due(
+            "scores", now, self.config.selector.recalc_hours * 3600
+        ):
+            await self._recalculate_scores(now)
         if self.max_runtime is not None and now - self.started_at >= self.max_runtime:
             self.request_stop("tempo maximo de execucao atingido")
 
@@ -1030,25 +1052,108 @@ class PaperRobot:
                 candle, "history_gap", f"historico com problema, nao opera: {problem}"
             )
             return
+        strategies: Sequence[Strategy] = self.strategies
+        insight: dict[str, Any] | None = None
+        if self.config.selector.enabled:
+            selected = await self._select(candle, window)
+            if selected is None:
+                return
+            strategies, insight = selected
         found: list[StrategySignal] = []
-        for strategy in self.strategies:
+        for strategy in strategies:
             if (signal := strategy.evaluate(window, self.context)) is not None:
                 found.append(signal)
         if not found:
-            names = ", ".join(s.name for s in self.strategies)
+            names = ", ".join(s.name for s in strategies)
             await self._record_candle_decision(
                 candle,
                 "no_signal",
                 f"nenhuma estrategia sinalizou entrada ({names})",
+                insight=insight,
                 close=str(candle.close),
             )
             return
         found.sort(key=lambda s: (-s.confidence, s.signal.strategy))
         for index, result in enumerate(found):
-            await self._decide(result, window, candle, now, index)
+            await self._decide(result, window, candle, now, index, insight)
+
+    async def _select(
+        self, candle: Candle, window: list[Candle]
+    ) -> tuple[list[Strategy], dict[str, Any]] | None:
+        """Estrategias liberadas pelo seletor nesta vela; None (com uma decisao de nao operar) se nenhuma."""
+        if not self._scores:
+            log.warning(
+                "selector_no_scores", symbol=candle.symbol, effect="sem scores salvos: o robo nao opera"
+            )
+            await self._record_candle_decision(
+                candle,
+                SELECTOR_NO_SCORES,
+                "Seletor de estratégias ligado, mas sem scores salvos: o robô não opera até que sejam "
+                "publicados (python -m engine.runner.validate --publish-scores).",
+            )
+            return None
+        selector = self.config.selector
+        reading = classify_regime(window, selector.regime)
+        decision = select_for_reading(
+            reading, candle.symbol, [s.name for s in self.strategies], self._scores, selector.selector
+        )
+        insight = selection_insight(decision)
+        if not decision.operate:
+            await self._record_candle_decision(candle, SELECTOR_IDLE, decision.reason, insight=insight)
+            return None
+        chosen = {c.strategy for c in decision.chosen}
+        return [s for s in self.strategies if s.name in chosen], insight
+
+    async def _load_scores(self) -> None:
+        if not self.config.selector.enabled:
+            return
+        if self._score_store is None:
+            log.error("selector_without_store", effect="seletor ligado sem repositorio de scores: nao opera")
+            return
+        try:
+            self._scores = await self._score_store.latest_scores(
+                self.config.timeframe.value, self.config.symbols
+            )
+        except Exception as error:  # sem scores o robo simplesmente nao opera
+            log.error("selector_scores_load_failed", error=scrub_text(repr(error)))
+            self._scores = {}
+        if self._scores:
+            log.info("selector_scores_loaded", keys=len(self._scores))
+        else:
+            log.warning("selector_no_scores", effect="nenhum snapshot de scores salvo: o robo nao opera")
+
+    async def _recalculate_scores(self, now: datetime) -> None:
+        """Scores novos de (trades do diario + amostras de backtest importadas); snapshot append-only."""
+        store, selector = self._score_store, self.config.selector
+        if store is None:
+            return
+        try:
+            symbols = set(self.config.symbols)
+            pool = [s for s in self._backtest_samples if s.symbol in symbols]
+            pool += await store.journal_samples(self.config.symbols)
+            if not pool:
+                return
+            scores = build_scores(pool, now, selector.selector, lookback_days=selector.lookback_days)
+            await store.publish(
+                list(scores.values()),
+                timeframe=self.config.timeframe.value,
+                origin="paper",
+                calculated_at=now,
+                run_id=self.run_id,
+            )
+            self._scores = scores
+            log.info("selector_scores_recalculated", keys=len(scores), samples=len(pool))
+        except Exception as error:  # mantem os scores anteriores
+            log.error("selector_scores_recalc_failed", error=scrub_text(repr(error)))
 
     async def _decide(
-        self, result: StrategySignal, window: list[Candle], candle: Candle, now: datetime, index: int = 0
+        self,
+        result: StrategySignal,
+        window: list[Candle],
+        candle: Candle,
+        now: datetime,
+        index: int = 0,
+        insight: dict[str, Any] | None = None,
     ) -> None:
         signal = result.signal
         name = signal.strategy
@@ -1066,6 +1171,7 @@ class PaperRobot:
                     strategy=name,
                     confidence=result.confidence,
                     signal=signal,
+                    insight=insight,
                 )
             )
 
@@ -1127,6 +1233,7 @@ class PaperRobot:
             confidence=result.confidence,
             signal=signal,
             order_id=order_id,
+            insight=insight,
         )
         await self._record(decision, order=record, with_state=True)
         await self._emit("orders", {"event": "entry_placed", "order": record.model_dump(mode="json")})
@@ -1186,7 +1293,15 @@ class PaperRobot:
             "vela reprocessada apos queda ou atraso: gestao de posicao aplicada, nenhuma entrada avaliada",
         )
 
-    async def _record_candle_decision(self, candle: Candle, code: str, reason: str, **context: Any) -> None:
+    async def _record_candle_decision(
+        self,
+        candle: Candle,
+        code: str,
+        reason: str,
+        *,
+        insight: dict[str, Any] | None = None,
+        **context: Any,
+    ) -> None:
         await self._record(
             self._decision(
                 at=candle.close_time,
@@ -1195,6 +1310,7 @@ class PaperRobot:
                 traded=False,
                 code=code,
                 reason=reason,
+                insight=insight,
                 context={"candle_open": candle.open_time.isoformat(), **context},
             )
         )
@@ -1212,6 +1328,7 @@ class PaperRobot:
         confidence: float | None = None,
         signal: Signal | None = None,
         order_id: str | None = None,
+        insight: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
     ) -> DecisionEntry:
         return DecisionEntry(
@@ -1228,6 +1345,7 @@ class PaperRobot:
             else f"{signal.strategy}:{symbol}:{signal.created_at:%y%m%d%H%M}",
             client_order_id=order_id,
             signal=signal,
+            insight=insight,
             context={
                 "calendar_open": self.config.allow_open_calendar
                 and self.calendar.coverage_problem(at) is not None,

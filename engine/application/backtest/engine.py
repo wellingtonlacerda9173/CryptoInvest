@@ -3,6 +3,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from engine.application.backtest.hypothetical import simulate_signal
 from engine.application.backtest.models import (
@@ -14,6 +15,7 @@ from engine.application.backtest.models import (
     RoundTrip,
 )
 from engine.application.backtest.settings import BacktestSettings, default_rules
+from engine.application.regime import RegimeTimeline
 from engine.application.risk import (
     ApprovedEntry,
     EmergencyExit,
@@ -32,6 +34,18 @@ from engine.application.risk import (
     open_position,
     plan_partial,
     rolling_quote_volume,
+)
+from engine.application.selector import (
+    SELECTOR_IDLE,
+    SELECTOR_VETO,
+    ScoreKey,
+    SelectionDecision,
+    SelectorSettings,
+    StrategyScore,
+    TradeSample,
+    build_scores,
+    select_for_reading,
+    selection_insight,
 )
 from engine.application.strategies import Strategy, StrategyContext, StrategySignal
 from engine.domain.candle import Candle
@@ -95,9 +109,15 @@ class BacktestEngine:
 
     A gestao de posicao (parcial no 1o alvo, breakeven, trailing, protecao de lucro) e a do modulo de risco;
     o gateway executa: stop (OCO sem alvo, subido via `raise_stop`), parcial como limit de venda no alvo e
-    saidas por protecao de lucro como venda a mercado na abertura seguinte. Taxas, precos e horarios dos
-    trades vem dos fills do gateway. Posicoes ainda abertas no fim dos dados NAO viram trade: entram na
-    curva de equity marcada a mercado e em `open_at_end`.
+    saidas por protecao de lucro como venda a mercado na abertura seguinte.
+
+    Seletor (opt-in, `selector.enabled`): a cada vela fechada o regime e classificado so com velas <= i e os
+    scores saem apenas de trades de `selector_history` ENCERRADOS ate o instante do ultimo recalculo; so a
+    estrategia escolhida chega ao gate. As demais sao avaliadas somente para o relatorio: seus sinais viram
+    `selector_veto` (operacao evitada, simulada ao final) e nunca influenciam a decisao.
+
+    Taxas, precos e horarios dos trades vem dos fills do gateway. Posicoes ainda abertas no fim dos dados
+    NAO viram trade: entram na curva de equity marcada a mercado e em `open_at_end`.
     """
 
     def __init__(
@@ -108,6 +128,8 @@ class BacktestEngine:
         rules: SymbolRules | None = None,
         calendar: EventCalendar | None = None,
         clock: Clock = _utc_now,
+        selector: SelectorSettings | None = None,
+        selector_history: Sequence[TradeSample] = (),
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -116,6 +138,8 @@ class BacktestEngine:
         self.rules = rules
         self.calendar = calendar or EventCalendar()
         self.clock = clock
+        self.selector = selector if selector is not None and selector.enabled else None
+        self.selector_history = tuple(selector_history)
 
     async def run(self, candles: Sequence[Candle], *, start: int = 0) -> BacktestResult:
         """`candles[:start]` e so aquecimento dos indicadores; o backtest roda de `start` ate o fim."""
@@ -130,6 +154,7 @@ class _Session:
         self.engine = engine
         self.settings = engine.settings
         self.risk = engine.settings.risk
+        self.state_risk = engine.settings.state_risk()
         self.rules = rules
         self.candles = candles
         self.start = start
@@ -150,6 +175,13 @@ class _Session:
         self.approvals = 0
         self.no_signal = 0
         self.index = start - 1
+        self.selector = engine.selector
+        self.timeline: RegimeTimeline | None = None
+        self.scores: dict[ScoreKey, StrategyScore] = {}
+        self.scores_at: datetime | None = None
+        self.last_idle: tuple[str, bool, tuple[str, ...]] | None = None
+        if self.selector is not None:
+            self.timeline = RegimeTimeline.from_candles(self.candles, self.selector.regime)
 
     async def execute(self) -> BacktestResult:
         while self.gateway.has_next:
@@ -303,7 +335,7 @@ class _Session:
         # logo ao dia anterior, como a foto de equity; fills de abertura pertencem a vela que abre
         live.last_leg_intra = trade.closed_at == self.gateway.now
         now = trade.closed_at - _PHOTO_LAG if live.last_leg_intra else trade.closed_at
-        self.state = self.state.record_trade(trade, now, self.risk)
+        self.state = self.state.record_trade(trade, now, self.state_risk)
 
     def _finish(self, live: _Live, trade: Trade) -> None:
         self._leg(live, trade)
@@ -398,7 +430,7 @@ class _Session:
         cash = balance.free + balance.locked
         if abs(cash - self.state.equity) > _RECONCILE_TOLERANCE:
             raise BacktestInvariantError(f"capital do gateway {cash} diverge do ledger {self.state.equity}")
-        self.state = self.state.observe_equity(cash, now - _PHOTO_LAG, self.risk)
+        self.state = self.state.observe_equity(cash, now - _PHOTO_LAG, self.state_risk)
 
     async def _expire_pending(self, now: datetime) -> None:
         _, expired = expire_pending(tuple(p.approved for p in self.pending.values()), now)
@@ -429,8 +461,34 @@ class _Session:
             at=candle.close_time, equity=equity, realized=self.state.equity, in_position=bool(self.live)
         )
 
+    def _current_scores(self, now: datetime) -> dict[ScoreKey, StrategyScore]:
+        selector = self.selector
+        if selector is None:
+            return {}
+        if self.scores_at is None or now - self.scores_at >= timedelta(hours=selector.recalc_hours):
+            self.scores = build_scores(
+                self.engine.selector_history, now, selector.selector, lookback_days=selector.lookback_days
+            )
+            self.scores_at = now
+        return self.scores
+
+    def _select(self, candle: Candle) -> SelectionDecision:
+        selector, timeline = self.selector, self.timeline
+        if selector is None or timeline is None or (reading := timeline.at(candle.close_time)) is None:
+            raise BacktestInvariantError("selecao sem leitura de regime")
+        return select_for_reading(
+            reading,
+            self.symbol,
+            [s.name for s in self.engine.strategies],
+            self._current_scores(candle.close_time),
+            selector.selector,
+        )
+
     async def _evaluate_signals(self, candle: Candle) -> None:
         window = self.candles[max(0, self.index - self.settings.history_window + 1) : self.index + 1]
+        if self.selector is not None:
+            await self._evaluate_selected(candle, window)
+            return
         found: list[StrategySignal] = []
         for strategy in self.engine.strategies:
             if (signal := strategy.evaluate(window, self.context)) is None:
@@ -441,14 +499,67 @@ class _Session:
         for result in found:
             await self._decide(result, window, candle)
 
-    async def _decide(self, result: StrategySignal, window: list[Candle], candle: Candle) -> None:
+    async def _evaluate_selected(self, candle: Candle, window: list[Candle]) -> None:
+        decision = self._select(candle)
+        context = selection_insight(decision)
+        chosen = {c.strategy for c in decision.chosen}
+        found: list[StrategySignal] = []
+        for strategy in self.engine.strategies:
+            if (signal := strategy.evaluate(window, self.context)) is None:
+                self.no_signal += 1
+            else:
+                found.append(signal)
+        found.sort(key=lambda s: (-s.confidence, s.signal.strategy))
+        reasons = {e.strategy: e.reason for e in decision.evaluated}
+        for result in found:
+            name = result.signal.strategy
+            if name in chosen:
+                await self._decide(result, window, candle, context)
+                continue
+            why = (
+                decision.reason if not decision.operate else reasons.get(name) or "outra estratégia escolhida"
+            )
+            self._veto(
+                name, SELECTOR_VETO, f"seletor vetou {name}: {why}", result.signal, result.confidence, context
+            )
+        key = (decision.regime.value, decision.operate, tuple(sorted(chosen)))
+        if not decision.operate and key != self.last_idle:
+            self._record_idle(decision, context)
+        self.last_idle = key
+
+    def _record_idle(self, decision: SelectionDecision, context: dict[str, Any]) -> None:
+        self.decisions.append(
+            DecisionRecord(
+                at=self._now(),
+                strategy="seletor",
+                symbol=self.symbol,
+                action=DecisionAction.SKIPPED,
+                code=SELECTOR_IDLE,
+                message=decision.reason,
+                context=context,
+            )
+        )
+
+    async def _decide(
+        self,
+        result: StrategySignal,
+        window: list[Candle],
+        candle: Candle,
+        context: dict[str, Any] | None = None,
+    ) -> None:
         signal = result.signal
         name = signal.strategy
         now = candle.close_time
         if any(live.emergency is not None for live in self.live.values()):
             message = "venda de emergencia em andamento"
             self._record(
-                name, DecisionAction.SKIPPED, "emergency_exit_pending", message, signal, result.confidence
+                name,
+                DecisionAction.SKIPPED,
+                "emergency_exit_pending",
+                message,
+                signal,
+                result.confidence,
+                context=context,
             )
             return
         market = MarketSnapshot(
@@ -473,7 +584,7 @@ class _Session:
             mode="backtest",
         )
         if isinstance(outcome, Rejection):
-            self._veto(name, outcome.code.value, outcome.message, signal, result.confidence)
+            self._veto(name, outcome.code.value, outcome.message, signal, result.confidence, context)
             return
         self.approvals += 1
         order_id = outcome.order.client_order_id
@@ -481,15 +592,30 @@ class _Session:
         if report.status is OrderStatus.REJECTED:
             reason = self.gateway.rejection_reason(order_id) or "recusada"
             self._veto(
-                name, "gateway_rejected", f"gateway recusou a ordem: {reason}", signal, result.confidence
+                name,
+                "gateway_rejected",
+                f"gateway recusou a ordem: {reason}",
+                signal,
+                result.confidence,
+                context,
             )
             return
         self.pending[order_id] = _Pending(outcome, name, result.confidence)
         reason = outcome.to_decision().reason
-        self._record(name, DecisionAction.TRADED, "approved", reason, signal, result.confidence, order_id)
+        self._record(
+            name, DecisionAction.TRADED, "approved", reason, signal, result.confidence, order_id, context
+        )
 
-    def _veto(self, strategy: str, code: str, message: str, signal: Signal, confidence: float) -> None:
-        self._record(strategy, DecisionAction.SKIPPED, code, message, signal, confidence)
+    def _veto(
+        self,
+        strategy: str,
+        code: str,
+        message: str,
+        signal: Signal,
+        confidence: float,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        self._record(strategy, DecisionAction.SKIPPED, code, message, signal, confidence, context=context)
         self.vetoes.append(_Veto(len(self.decisions) - 1, signal, self.index, self.state.equity))
 
     def _record(
@@ -501,6 +627,7 @@ class _Session:
         signal: Signal,
         confidence: float,
         order_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> None:
         self.decisions.append(
             DecisionRecord(
@@ -515,6 +642,7 @@ class _Session:
                 stop=signal.stop_loss,
                 target=signal.take_profit,
                 order_id=order_id,
+                context=context,
             )
         )
 

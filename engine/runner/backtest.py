@@ -34,6 +34,7 @@ from engine.application.strategies import (
     StopMode,
     Strategy,
 )
+from engine.application.strategies.registry import STRATEGY_REGISTRY
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Timeframe
 from engine.runner.candle_source import floor_to_timeframe, load_candles
@@ -93,6 +94,10 @@ def build_strategies(names: Sequence[str], params: Mapping[str, Decimal]) -> lis
             rsi = {} if rsi_min is None else {"rsi_range": (rsi_min, _EMA_RSI_MAX)}
             config_ema = EmaCrossTrendConfig(levels=_levels(params, StopMode.ATR), **confidence, **rsi)
             strategies.append(EmaCrossTrend(config_ema))
+        elif name == "all":
+            strategies += [factory() for factory in STRATEGY_REGISTRY.values()]
+        elif name in STRATEGY_REGISTRY:
+            strategies.append(STRATEGY_REGISTRY[name]())
         else:
             raise ValueError(f"estrategia desconhecida '{name}'; validas: {list(STRATEGY_NAMES)}")
     return strategies

@@ -33,6 +33,21 @@ REASONS: Final[dict[str, Reason]] = {
         "Vela reprocessada depois de uma queda ou atraso: o robô só cuidou das posições, sem abrir entradas.",
         "waited",
     ),
+    "selector_idle": Reason(
+        "Esperou",
+        "O robô avaliou o mercado e decidiu não operar agora: nenhuma estratégia tem histórico bom o "
+        "bastante neste tipo de mercado.",
+        "waited",
+    ),
+    "selector_no_scores": Reason(
+        "Esperou",
+        "O seletor de estratégias está ligado, mas ainda não há avaliações salvas. O robô fica parado até "
+        "elas existirem.",
+        "waited",
+    ),
+    "selector_veto": Reason(
+        "Não entrou", "O seletor escolheu outra estratégia (ou nenhuma) para este tipo de mercado.", "refused"
+    ),
     "history_gap": Reason(
         "Não entrou", "Faltam dados recentes de mercado para decidir com segurança.", "refused"
     ),

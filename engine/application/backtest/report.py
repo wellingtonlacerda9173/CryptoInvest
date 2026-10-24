@@ -159,7 +159,12 @@ def _monthly(m: Metrics) -> list[str]:
     return [_table(["Mes", "Retorno (equity)", "Resultado realizado", "Trades fechados"], rows), ""]
 
 
-_KIND_LABEL = {"capacity": "capacidade", "state_lock": "trava de estado", "filter": "filtro de mercado/risco"}
+_KIND_LABEL = {
+    "capacity": "capacidade",
+    "state_lock": "trava de estado",
+    "filter": "filtro de mercado/risco",
+    "selector": "seletor de estrategias",
+}
 
 
 def _avoided(summary: AvoidedSummary) -> list[str]:

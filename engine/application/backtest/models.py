@@ -1,18 +1,12 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-
-from pydantic import BaseModel, ConfigDict
+from typing import Any
 
 from engine.application.backtest.settings import BacktestSettings
+from engine.application.records import Record as Record
 from engine.application.risk import AuditEntry
 from engine.domain.trade import ExitReason, Trade
-
-
-class Record(BaseModel):
-    """Registro de resultado: imutavel, sem revalidacao em copias (as listas chegam a dezenas de milhares)."""
-
-    model_config = ConfigDict(frozen=True)
 
 
 class BacktestInvariantError(RuntimeError):
@@ -55,6 +49,7 @@ class DecisionRecord(Record):
     target: Decimal | None = None
     order_id: str | None = None
     hypothetical: HypotheticalOutcome | None = None
+    context: dict[str, Any] | None = None
 
 
 class EquityPoint(Record):

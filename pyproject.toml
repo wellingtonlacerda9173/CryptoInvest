@@ -70,4 +70,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-m 'not integration'"
-markers = ["integration: requer rede e/ou banco de dados (pulavel se indisponivel)"]
+markers = [
+    "integration: requer rede e/ou banco de dados (pulavel se indisponivel)",
+    "slow: calibracao estatistica com muitos sorteios (dezenas de segundos)",
+]

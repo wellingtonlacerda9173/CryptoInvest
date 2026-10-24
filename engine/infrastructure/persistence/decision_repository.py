@@ -1,8 +1,11 @@
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from engine.domain.journal import DecisionEntry
+from engine.domain.signal import Signal
 from engine.infrastructure.persistence.models import DecisionRow
 from engine.infrastructure.persistence.serialization import ConflictError, affected, dump_model, to_json
 
@@ -11,7 +14,26 @@ class DecisionConflictError(ConflictError):
     """Ja existe uma decisao com esta chave e conteudo diferente; o feed nao e reescrito."""
 
 
+_SIGNAL_FIELDS = frozenset(Signal.model_fields)
+
+
+def _split_signal(stored: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """`decisions.signal` guarda o sinal e (opcionalmente) o parecer do seletor lado a lado."""
+    if not stored:
+        return None, None
+    levels = {k: v for k, v in stored.items() if k in _SIGNAL_FIELDS}
+    insight = {k: v for k, v in stored.items() if k not in _SIGNAL_FIELDS}
+    return levels or None, insight or None
+
+
+def _merged_signal(entry: DecisionEntry) -> dict[str, Any] | None:
+    if entry.signal is None and entry.insight is None:
+        return None
+    return {**(dump_model(entry.signal) if entry.signal else {}), **(to_json(entry.insight) or {})}
+
+
 def _entry(row: DecisionRow) -> DecisionEntry:
+    levels, insight = _split_signal(row.signal)
     return DecisionEntry.model_validate(
         {
             "decided_at": row.decided_at,
@@ -24,7 +46,8 @@ def _entry(row: DecisionRow) -> DecisionEntry:
             "confidence": row.confidence,
             "signal_id": row.signal_id,
             "client_order_id": row.client_order_id,
-            "signal": row.signal,
+            "signal": levels,
+            "insight": insight,
             "context": row.context,
         }
     )
@@ -50,7 +73,7 @@ class DecisionRepository:
             "confidence": entry.confidence,
             "signal_id": entry.signal_id,
             "client_order_id": entry.client_order_id,
-            "signal": dump_model(entry.signal) if entry.signal else None,
+            "signal": _merged_signal(entry),
             "context": to_json(entry.context),
         }
         stmt = (

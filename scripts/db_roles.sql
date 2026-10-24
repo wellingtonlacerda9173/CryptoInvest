@@ -71,7 +71,8 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, :"app_role", :"api_rol
 
 -- imutaveis: so SELECT e INSERT
 GRANT SELECT, INSERT ON
-    trades, decisions, control_events, fills, risk_state, gateway_state, audit_log, equity_snapshots
+    trades, decisions, control_events, fills, risk_state, gateway_state, audit_log, equity_snapshots,
+    strategy_scores
     TO :"app_role";
 -- configuracao versionada: o robo so LE a ultima versao no start (quem grava e a API)
 GRANT SELECT ON config_versions TO :"app_role";
@@ -94,7 +95,7 @@ GRANT UPDATE (open, high, low, close, volume) ON candles TO :"app_role";
 -- Leitura do diario e da configuracao (nunca escrita: o diario e do robo).
 GRANT SELECT ON
     trades, decisions, control_events, fills, risk_state, gateway_state, equity_snapshots,
-    runs, orders, positions, candles
+    runs, orders, positions, candles, strategy_scores
     TO :"api_role";
 -- Auditoria e configuracao versionada: so SELECT e INSERT (append-only tambem por privilegio).
 GRANT SELECT, INSERT ON audit_log, config_versions TO :"api_role";

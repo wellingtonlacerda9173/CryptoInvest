@@ -438,6 +438,8 @@ class Harness:
         quotes: Callable[[str], tuple[Decimal, Decimal] | None] | None = None,
         paths: RunPaths | None = None,
         strategies: Sequence[Strategy] | None = None,
+        score_store: Any = None,
+        backtest_samples: Sequence[Any] = (),
     ) -> None:
         self.clock = clock or FakeClock(T0 + timedelta(hours=29))
         self.journal: Any = journal or MemoryJournal()
@@ -459,6 +461,8 @@ class Harness:
             quotes=quotes,
             paths=paths,
             persist_retry_delays=(0.001, 0.001, 0.001),
+            score_store=score_store,
+            backtest_samples=backtest_samples,
         )
 
     async def start(self) -> "Harness":
