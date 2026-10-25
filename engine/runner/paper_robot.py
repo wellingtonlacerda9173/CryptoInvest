@@ -88,6 +88,7 @@ from engine.infrastructure.backtest import Fill
 from engine.infrastructure.config.logging import scrub_text
 from engine.infrastructure.notifications import AlertDispatcher
 from engine.infrastructure.paper import Clock, PaperGateway, PaperHealth
+from engine.runner.candle_store import CandleStore, GapKey, backfill_store, persist_closed
 from engine.runner.command_channel import AuditSink, DiscardLimiter, Outcome, SignedCommandSource
 from engine.runner.paper_config import PaperRunConfig, RunPaths
 from engine.runner.paper_control import (
@@ -121,6 +122,10 @@ EMERGENCY_LEG = "emg"
 _PHOTO_LAG = timedelta(microseconds=1)
 LESSON_CACHE_SECONDS = 600
 CALENDAR_RELOAD_SECONDS = 3600
+CANDLE_STORE_SYNC_SECONDS = 300
+CANDLE_PERSIST_TIMEOUT_SECONDS = 2.5
+CANDLE_PERSIST_ALERT_AFTER = 3
+MARKET_DATA_STALE_TEXT = "Dados de mercado desatualizados: novas entradas recusadas, stops seguem ativos"
 _CAPITAL_TOLERANCE = Decimal("0.000001")
 _BACKOFF_RESET_SECONDS = 60.0
 PERSISTENCE_PAUSE = "persistencia indisponivel: "
@@ -221,6 +226,7 @@ class PaperRobot:
         lessons_job: Callable[[], Awaitable[object]] | None = None,
         lessons_interval_hours: int = 168,
         calendar_reload: Callable[[EventCalendar, datetime], EventCalendar] | None = None,
+        candle_store: CandleStore | None = None,
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -287,6 +293,10 @@ class PaperRobot:
         self._lessons_seconds = lessons_interval_hours * 3600
         self._lesson_cache: tuple[datetime, tuple[str, ...]] | None = None
         self._background: set[asyncio.Task[None]] = set()
+        self._candle_store = candle_store
+        self._feed_stale: dict[str, timedelta] = {}
+        self._store_gaps: set[GapKey] = set()
+        self._persist_failures = 0
 
     # ------------------------------------------------------------------ ciclo de vida
 
@@ -298,7 +308,7 @@ class PaperRobot:
             return BotState.FAILED_PERSISTENCE
         if self.state.halted:
             return BotState.HALTED
-        if self.state.paused or self._blind:
+        if self.state.paused or self._blind or self._feed_stale:
             return BotState.PAUSED
         return BotState.RUNNING
 
@@ -369,6 +379,7 @@ class PaperRobot:
         await self._flag_restore_issues()
         await self._consume_commands(now)
         await self._bootstrap_history(now)
+        await self._sync_candle_store(now, reconcile=True)
         async with self._lock:
             await self._process_fills()
             await self._place_exits()
@@ -376,7 +387,7 @@ class PaperRobot:
             await self._save_state(self.clock.now())
         await self._load_scores()
         self._bot_state = BotState.RUNNING
-        self._due = {"scores": now}
+        self._due = {"scores": now, "candle_store": now}
         await self._publish_state("start")
 
     async def run(self) -> None:
@@ -419,8 +430,10 @@ class PaperRobot:
             await self._drain_alerts()
             await self.bus.close()
             return
-        for task in list(self._background):
+        background = list(self._background)
+        for task in background:
             task.cancel()
+        await asyncio.gather(*background, return_exceptions=True)
         async with self._lock:
             now = self.clock.now()
             if self.journal.down:
@@ -542,6 +555,7 @@ class PaperRobot:
             await self._place_exits()
             await self._expire_pending(now)
             await self._check_health(now)
+            await self._check_candle_feed(now)
             if self._is_due("equity", now, self.config.equity_seconds):
                 await self._equity(now)
             if self._is_due("reconcile", now, self.config.reconcile_seconds):
@@ -549,6 +563,8 @@ class PaperRobot:
             if self._is_due("heartbeat", now, self.config.heartbeat_seconds):
                 await self._emit("heartbeat", self.status_payload(now))
                 self._write_status(now)
+        if self._candle_store is not None and self._is_due("candle_store", now, CANDLE_STORE_SYNC_SECONDS):
+            self._spawn_store_sync(now)
         if self._calendar_reload is not None and self._is_due("calendar", now, CALENDAR_RELOAD_SECONDS):
             self.calendar = self._calendar_reload(self.calendar, now)
         if self.config.selector.enabled and self._is_due(
@@ -569,9 +585,16 @@ class PaperRobot:
             except Exception as error:
                 log.warning("lessons_job_failed", error=scrub_text(repr(error)))
 
-        task = asyncio.create_task(run())
+        self._track(asyncio.create_task(run()))
+
+    def _track(self, task: asyncio.Task[None]) -> None:
         self._background.add(task)
-        task.add_done_callback(self._background.discard)
+        task.add_done_callback(self._background_done)
+
+    def _background_done(self, task: asyncio.Task[None]) -> None:
+        self._background.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            log.error("background_task_failed", task=task.get_name(), error=scrub_text(repr(error)))
 
     async def _lesson_notes(self, now: datetime) -> tuple[str, ...]:
         """Licoes APROVADAS por admin (sanitizadas e limitadas); cache curto; falha => sem licoes."""
@@ -634,8 +657,11 @@ class PaperRobot:
             if candle.open_time <= last:
                 return []
             if candle.open_time - last > step:
-                for missing in await self._recover_gap(symbol, last + step, candle.open_time):
+                missing_candles = await self._recover_gap(symbol, last + step, candle.open_time)
+                for missing in missing_candles:
                     await self._handle_candle(missing, stale=True)
+                if len(missing_candles) < (candle.open_time - last) // step - 1:
+                    await self._alert("candle_gap_unrecovered", f"{symbol}: lacuna de velas nao recuperada")
         lag = self.clock.now() - candle.close_time
         return await self._handle_candle(candle, stale=lag > timedelta(seconds=self.config.eval_lag_seconds))
 
@@ -659,6 +685,7 @@ class PaperRobot:
         self._history[symbol].append(candle)
         self._marks[symbol] = candle.close
         self._last_handled[symbol] = candle.open_time
+        await self._persist_candle(candle)
         await self._process_fills()
         await self._manage(symbol, candle)
         await self._set_state(self.state.roll_day(now), now)
@@ -675,6 +702,27 @@ class PaperRobot:
         return tickets
 
     # ------------------------------------------------------------------ fills
+
+    async def _persist_candle(self, candle: Candle) -> None:
+        """Gravacao limitada por timeout: banco travado nao segura stops/fills (o backfill refaz a vela)."""
+        store = self._candle_store
+        if store is None:
+            return
+        try:
+            ok = await asyncio.wait_for(persist_closed(store, [candle]), CANDLE_PERSIST_TIMEOUT_SECONDS)
+        except TimeoutError:
+            log.error("candle_persist_timeout", symbol=candle.symbol, timeout=CANDLE_PERSIST_TIMEOUT_SECONDS)
+            ok = False
+        if ok:
+            if self._persist_failures >= CANDLE_PERSIST_ALERT_AFTER:
+                log.warning("candle_persist_recovered", failures=self._persist_failures)
+            self._persist_failures = 0
+            return
+        self._persist_failures += 1
+        if self._persist_failures == CANDLE_PERSIST_ALERT_AFTER:
+            await self._alert(
+                "candle_persist_failing", f"{self._persist_failures} falhas seguidas ao gravar velas no banco"
+            )
 
     async def _process_fills(self) -> None:
         """Processa fills novos em ordem. `_seen_seq` so avanca DEPOIS que o evento foi gravado (diario ou
@@ -1403,6 +1451,11 @@ class PaperRobot:
         if self._blind:
             await skip("stops_blind", "stops cegos (sem dados de mercado): novas entradas pausadas")
             return None
+        if stale := self._stale_feeds(self.clock.now()):
+            await skip(
+                "market_data_stale", f"feed de velas obsoleto, novas entradas recusadas: {_ages(stale)}"
+            )
+            return None
         prices = self._quotes(symbol)
         if prices is None:
             await skip("no_quote", "sem cotacao fresca do book para validar a entrada")
@@ -1752,6 +1805,65 @@ class PaperRobot:
                 gateway_state=self._blob(),
                 audit={"positions": positions},
             )
+
+    def _stale_feeds(self, now: datetime) -> dict[str, timedelta]:
+        """Simbolos sem a ultima vela fechada esperada ha mais que a tolerancia de avaliacao."""
+        seconds = self.config.timeframe.seconds
+        step = timedelta(seconds=seconds)
+        expected = _floor(now, seconds) - step
+        if now - _floor(now, seconds) <= timedelta(seconds=self.config.eval_lag_seconds):
+            expected -= step
+        stale: dict[str, timedelta] = {}
+        for symbol in self.config.symbols:
+            last = self._last_handled.get(symbol)
+            if last is None or last < expected:
+                stale[symbol] = now - (self.started_at if last is None else last + step)
+        return stale
+
+    def _stale_pause_reasons(self, now: datetime) -> list[dict[str, Any]]:
+        if not self._feed_stale:
+            return []
+        reason = f"{MARKET_DATA_STALE_TEXT}: {_ages(self._feed_stale)}"
+        return [{"reason": reason, "operator": SYSTEM, "at": now.isoformat(), "automatic": True}]
+
+    async def _check_candle_feed(self, now: datetime) -> None:
+        stale = self._stale_feeds(now)
+        changed = bool(stale) != bool(self._feed_stale)
+        self._feed_stale = stale
+        if not changed:
+            return
+        if stale:
+            log.error(
+                "MARKET_DATA_STALE", stale=_ages(stale), effect="novas entradas recusadas; stops ativos"
+            )
+            await self._alert("market_data_stale", f"{MARKET_DATA_STALE_TEXT}: {_ages(stale)}")
+        else:
+            log.warning("market_data_stale_cleared")
+        await self._publish_state("market_data_stale")
+
+    async def _sync_candle_store(self, now: datetime, *, reconcile: bool = False) -> None:
+        store = self._candle_store
+        if store is None:
+            return
+        for symbol in self.config.symbols:
+            result = await backfill_store(
+                store,
+                self.market,
+                symbol,
+                self.config.timeframe,
+                now,
+                reconcile=reconcile,
+                known_gaps=self._store_gaps,
+            )
+            if result.unrecovered:
+                await self._alert(
+                    "candle_store_gap", f"{symbol}: {result.unrecovered} vela(s) ausentes no banco"
+                )
+
+    def _spawn_store_sync(self, now: datetime) -> None:
+        if any(t.get_name() == "candle_store_sync" for t in self._background):
+            return
+        self._track(asyncio.create_task(self._sync_candle_store(now), name="candle_store_sync"))
 
     async def _reconcile(self, now: datetime, *, startup: bool = False) -> list[Divergence]:
         if self.journal.down:
@@ -2273,11 +2385,15 @@ class PaperRobot:
             "started_at": self.started_at.isoformat(),
             "code_version": self.code_version,
             "stops_blind": self._blind,
+            "market_data_stale": {s: int(a.total_seconds()) for s, a in self._feed_stale.items()},
             "halted": state.halted,
             "halt_reason": state.halt_reason,
             "paused": state.paused,
             "pause_reason": state.pause_reason,
-            "pause_reasons": [e.model_dump(mode="json") for e in self._pauses.values()],
+            "pause_reasons": [
+                *(e.model_dump(mode="json") for e in self._pauses.values()),
+                *self._stale_pause_reasons(now),
+            ],
             "equity": str(self._mtm_equity()),
             "realized_equity": str(state.equity),
             "peak_equity": str(state.peak_equity),
@@ -2393,6 +2509,10 @@ def _ai_reason(code: str, opinion: AnalystOpinion, confidence: float, config: Pa
             f"{config.ai_min_confidence:.0%}: {opinion.reason}"
         )
     return f"IA vetou a entrada: {opinion.reason}"
+
+
+def _ages(stale: Mapping[str, timedelta]) -> str:
+    return ", ".join(f"{s} sem vela ha {int(a.total_seconds() // 60)} min" for s, a in sorted(stale.items()))
 
 
 def _entry_id(candle: Candle, index: int = 0) -> str:

@@ -185,7 +185,7 @@ export default function ControlePage() {
   const isOn = !!s && ON_STATES.includes(s.state);
   const halted = s?.state === 'HALTED';
   const canPause = !!s && s.state === 'RUNNING';
-  const canResume = !!s && s.state === 'PAUSED';
+  const canResume = !!s && s.state === 'PAUSED' && s.paused;
   const dialogCopy = DIALOGS[last];
 
   const submit = (action: ControlAction) => (input: { operator: string; reason: string }) => {

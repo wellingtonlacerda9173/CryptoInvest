@@ -141,6 +141,11 @@ REASONS: Final[dict[str, Reason]] = {
     "stops_blind": Reason(
         "Não entrou", "Sem dados de mercado: novas entradas pausadas. Stops seguem ativos.", "refused"
     ),
+    "market_data_stale": Reason(
+        "Não entrou",
+        "Os dados de mercado estão desatualizados: novas entradas recusadas. Stops seguem ativos.",
+        "refused",
+    ),
     "no_quote": Reason("Não entrou", "Sem cotação fresca para validar a entrada.", "refused"),
     "emergency_exit_pending": Reason("Não entrou", "Uma venda de emergência está em andamento.", "refused"),
     "duplicate_order": Reason("Não entrou", "A ordem já existia; o sinal não foi reenviado.", "refused"),

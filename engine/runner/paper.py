@@ -33,6 +33,7 @@ from engine.infrastructure.config.settings import Settings, load_settings, resol
 from engine.infrastructure.notifications import AlertDispatcher, NotifySettings, build_notifier
 from engine.infrastructure.paper import SystemClock
 from engine.infrastructure.persistence.ai_call_repository import SqlAiCallStore
+from engine.infrastructure.persistence.candle_repository import CandleRepository
 from engine.infrastructure.persistence.lesson_repository import SqlLessonStore
 from engine.infrastructure.persistence.recovery import load_recovery_state
 from engine.infrastructure.persistence.schema_check import SchemaMismatchError, ensure_schema_current
@@ -338,6 +339,7 @@ async def run_start(args: argparse.Namespace) -> int:
         config_source=versioned.source,
         rules=_rules(config.symbols),
         calendar=load_calendar(args.calendar),
+        candle_store=CandleRepository(sessions),
         calendar_reload=CalendarReloader(args.calendar, DEFAULT_CALENDAR).reload,
         clock=SystemClock(),
         commands=CommandQueue(paths.commands),
