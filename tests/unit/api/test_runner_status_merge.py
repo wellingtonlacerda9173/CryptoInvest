@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from api.services.runner_status import RunnerStatusService
@@ -62,16 +62,20 @@ async def test_state_newer_than_heartbeat_wins_the_content() -> None:
 
 
 KINDS = st.sampled_from(["heartbeat", "state", "equity"])
+# Idades em milissegundos inteiros: o carimbo ISO tem resolucao de microssegundo, entao floats arbitrarios
+# (subnormais, diferencas < 1us) colapsam no mesmo instante e tornam o "mais novo" ambiguo.
+AGES = st.integers(0, 14_000).map(lambda ms: ms / 1000)
 
 
 @settings(max_examples=150, deadline=None)
 @given(
-    ages=st.dictionaries(KINDS, st.floats(min_value=0, max_value=14, allow_nan=False), min_size=1),
+    ages=st.dictionaries(KINDS, AGES, min_size=1),
     versions=st.fixed_dictionaries({"heartbeat": st.integers(1, 9), "state": st.integers(1, 9)}),
 )
 async def test_content_always_comes_from_the_newest_heartbeat_or_state(
     ages: dict[str, float], versions: dict[str, int]
 ) -> None:
+    assume(ages.get("heartbeat") != ages.get("state") or "heartbeat" not in ages)
     latest = {
         kind: event(kind, age, **({} if kind == "equity" else {"config_version": versions[kind]}))
         for kind, age in ages.items()
