@@ -8,8 +8,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import URL
+from sqlalchemy import URL, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from engine.infrastructure.persistence.models import DecisionRow, RunRow
 from tests.integration.api.conftest import Harness, Session
 from tests.integration.api.runner_support import (
     OPEN_RUN_ID,
@@ -487,6 +489,77 @@ async def test_candles_for_a_pair_without_history_are_empty_and_bad_input_is_rej
         {},
     ):
         assert (await rh_reader.get("/market/candles", params=bad)).status_code == 422
+
+
+async def test_candles_carry_chart_decisions_hiding_no_signal_unless_asked(
+    rh: Harness, rh_reader: Session, seeded: dict[str, Any]
+) -> None:
+    params = {"symbol": "BTC/USDT", "timeframe": "1h", "limit": 100}
+    plain = (await rh_reader.get("/market/candles", params=params)).json()
+    assert plain["decisions"] and plain["decisions_truncated"] is False
+    assert {d["tier"] for d in plain["decisions"]} <= {"entered", "blocked"}
+    assert all(d["label"] and d["text"] and d["code"] for d in plain["decisions"])
+    times = [d["t"] for d in plain["decisions"]]
+    assert times == sorted(times)
+    full = (await rh_reader.get("/market/candles", params=params | {"quiet": True})).json()
+    assert len(full["decisions"]) >= len(plain["decisions"])
+    assert {d["code"] for d in full["decisions"]} >= {d["code"] for d in plain["decisions"]}
+    assert len(full["decisions"]) <= 200
+    assert (await rh_reader.get("/market/candles", params=params | {"quiet": "talvez"})).status_code == 422
+
+
+async def test_chart_decisions_exclude_other_runs_pairs_and_old_ones_and_cap_at_200(
+    rh: Harness,
+    rh_reader: Session,
+    fake_link: FakeLink,
+    module_sessions: async_sessionmaker[AsyncSession],
+    seeded: dict[str, Any],
+) -> None:
+    alive(rh, fake_link)
+    params = {"symbol": "BTC/USDT", "timeframe": "1h", "limit": 100}
+    first_open = datetime.fromisoformat(
+        (await rh_reader.get("/market/candles", params=params)).json()["candles"][0]["t"]
+    )
+    now = datetime.now(UTC)
+
+    def decision(key: str, run: str, symbol: str, at: datetime, code: str) -> DecisionRow:
+        return DecisionRow(
+            decision_key=key, run_id=run, decided_at=at, symbol=symbol, action="skip",
+            traded=False, code=code, reason=code, strategy="elephant",
+        )  # fmt: skip
+
+    async with module_sessions.begin() as db:
+        db.add(RunRow(run_id="paper-it-live", mode="live", started_at=now, config_hash="h", code_version="c"))
+        await db.flush()
+        db.add_all(
+            [
+                decision("x-live", "paper-it-live", "BTC/USDT", now, "ai_veto"),
+                decision("x-other", RUN_ID, "ETH/USDT", now, "ai_veto"),
+                decision("x-old", RUN_ID, "BTC/USDT", first_open - timedelta(hours=1), "ai_veto"),
+                *[
+                    decision(f"x-q{i}", RUN_ID, "BTC/USDT", now + timedelta(seconds=i), "no_signal")
+                    for i in range(201)
+                ],
+            ]
+        )
+
+    full = (await rh_reader.get("/market/candles", params=params | {"quiet": True})).json()
+    assert len(full["decisions"]) == 200 and full["decisions_truncated"] is True
+    assert {d["code"] for d in full["decisions"]} == {"no_signal"}
+    assert {d["strategy"] for d in full["decisions"]} == {"elephant"}
+    plain = (await rh_reader.get("/market/candles", params=params)).json()
+    codes = {d["code"] for d in plain["decisions"]}
+    assert "no_signal" not in codes and plain["decisions_truncated"] is False
+    ids = {d["id"] for d in plain["decisions"]} | {d["id"] for d in full["decisions"]}
+    async with module_sessions() as db:
+        excluded = set(
+            (
+                await db.scalars(
+                    select(DecisionRow.id).where(DecisionRow.decision_key.in_(["x-live", "x-other", "x-old"]))
+                )
+            ).all()
+        )
+    assert excluded and not ids & excluded
 
 
 # --------------------------------------------------------------------------- glossario e segredos

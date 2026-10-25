@@ -296,6 +296,36 @@ class LevelOut(Out):
     since: datetime
 
 
+class TickerQuoteOut(Out):
+    symbol: str
+    price: float
+    change_24h_pct: float
+    as_of: datetime
+    age_seconds: float
+    stale: bool
+
+
+class TickerOut(Out):
+    """Cotacao ao vivo so para exibir. Par ausente de `quotes` = sem cotacao ao vivo agora."""
+
+    quotes: list[TickerQuoteOut]
+
+
+ChartDecisionTier = Literal["entered", "blocked", "quiet"]
+
+
+class ChartDecisionOut(Out):
+    """Decisao do robo para desenhar no grafico. `quiet` = sem sinal (so vem quando pedido)."""
+
+    id: int
+    t: datetime
+    tier: ChartDecisionTier
+    label: str
+    text: str
+    code: str
+    strategy: str | None
+
+
 class CandlesOut(Out):
     symbol: str
     timeframe: str
@@ -309,6 +339,8 @@ class CandlesOut(Out):
     volume_24h: float | None
     last_decision: str | None
     blind_since: datetime | None = None
+    decisions: list[ChartDecisionOut] = Field(default_factory=list)
+    decisions_truncated: bool = False
 
 
 class GlossaryItemOut(Out):

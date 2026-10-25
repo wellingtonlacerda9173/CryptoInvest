@@ -9,16 +9,19 @@ export function CardError({
   onRetry,
   updatedAt,
   retrying,
+  message,
 }: {
   error: unknown;
   onRetry: () => void;
   updatedAt?: number;
   retrying?: boolean;
+  message?: string;
 }) {
   const text =
-    error instanceof ApiError && error.isNetwork
+    message ??
+    (error instanceof ApiError && error.isNetwork
       ? 'Sem conexão com o servidor.'
-      : 'Não foi possível carregar estes dados.';
+      : 'Não foi possível carregar estes dados.');
   return (
     <div
       role="alert"

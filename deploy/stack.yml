@@ -157,6 +157,7 @@ services:
       API_TRUSTED_PROXIES: '["10.77.1.0/24"]'
       API_RECOVERY_ACCEPT_LEGACY_HASHES: "false"
       API_RUNNER_DATA_DIR: /var/lib/cryptoinvest/paper
+      API_CALENDAR_PATH: /var/lib/cryptoinvest/calendar/volatility_events.json
       API_BACKTEST_CACHE_DIR: /var/lib/cryptoinvest/cache
       API_BACKTEST_MAX_MEMORY_MB: "1024"
     secrets:
@@ -170,6 +171,7 @@ services:
     volumes:
       - paper-data:/var/lib/cryptoinvest/paper
       - api-cache:/var/lib/cryptoinvest/cache
+      - calendar:/var/lib/cryptoinvest/calendar:ro
       - type: tmpfs
         target: /tmp
         tmpfs: {size: 67108864}
@@ -205,7 +207,7 @@ services:
   runner:
     image: ${REGISTRY:-cryptoinvest}/runner:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
     # Run estavel: reiniciar com o MESMO --run-id recupera posicoes, stops, risco e halt.
-    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "${RUNNER_RUN_ID:-paper-main}", "--data-dir", "/var/lib/cryptoinvest/paper", "--json-logs"]
+    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "${RUNNER_RUN_ID:-paper-main}", "--data-dir", "/var/lib/cryptoinvest/paper", "--calendar", "/var/lib/cryptoinvest/calendar/volatility_events.json", "--json-logs"]
     user: "10001:10001"
     read_only: true
     cap_drop: [ALL]
@@ -225,6 +227,7 @@ services:
       - {source: redis_password, target: redis_password, uid: "10001", gid: "10001", mode: 0400}
     volumes:
       - paper-data:/var/lib/cryptoinvest/paper
+      - calendar:/var/lib/cryptoinvest/calendar:ro
       - type: tmpfs
         target: /tmp
         tmpfs: {size: 67108864}
@@ -258,6 +261,51 @@ services:
       resources:
         limits: {cpus: "1.0", memory: 1G}
         reservations: {cpus: "0.25", memory: 256M}
+
+  # Unico escritor do volume `calendar` (runner e api so leem): atualiza o calendario de eventos 1x/dia a partir de
+  # fontes oficiais publicas (FOMC, BLS, Deribit). Falha de fonte => arquivo mantido; o gate segue fechado se vencer.
+  calendar-updater:
+    image: ${REGISTRY:-cryptoinvest}/runner:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
+    command: ["python", "-m", "engine.runner.calendar_update", "--calendar", "/var/lib/cryptoinvest/calendar/volatility_events.json", "--seed", "/app/config/volatility_events.json", "--loop", "--json-logs"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - calendar:/var/lib/cryptoinvest/calendar
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 16777216}
+    networks: [egress]
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "calendar"]
+      interval: 1h
+      timeout: 10s
+      retries: 1
+      start_period: 5m
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.cryptoinvest == primary]
+        max_replicas_per_node: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5m
+        max_attempts: 5
+        window: 10m
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits: {cpus: "0.25", memory: 128M}
+        reservations: {memory: 32M}
 
   web:
     image: ${REGISTRY:-cryptoinvest}/web:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
@@ -326,6 +374,7 @@ volumes:
   timescale-data:
   redis-data:
   paper-data:
+  calendar:
   api-cache:
 
 secrets:

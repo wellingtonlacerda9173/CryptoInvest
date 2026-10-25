@@ -13,7 +13,7 @@ RUN uv sync --frozen --no-dev --extra ai --no-install-project
 FROM python:3.12.13-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2 AS base
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin app \
-    && install -d -o app -g app -m 0750 /var/lib/cryptoinvest /var/lib/cryptoinvest/paper /var/lib/cryptoinvest/cache /var/lib/cryptoinvest/reports /var/lib/cryptoinvest/data /var/lib/cryptoinvest/data/cache /var/lib/cryptoinvest/data/selector
+    && install -d -o app -g app -m 0750 /var/lib/cryptoinvest /var/lib/cryptoinvest/paper /var/lib/cryptoinvest/cache /var/lib/cryptoinvest/reports /var/lib/cryptoinvest/data /var/lib/cryptoinvest/data/cache /var/lib/cryptoinvest/data/selector /var/lib/cryptoinvest/calendar
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \

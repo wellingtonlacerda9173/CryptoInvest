@@ -190,8 +190,10 @@ def test_calendar_loads_from_json_and_shipped_file_fails_closed(tmp_path: Path) 
 
     assert loaded.windows[0].label == "FOMC"
     assert loaded.coverage_problem(NOW) is None
-    assert shipped.windows == ()
-    assert rejected(evaluate(calendar=shipped)) is RejectionCode.EVENT_CALENDAR_STALE
+    assert shipped.windows
+    assert shipped.valid_until is not None
+    after_coverage = NOW.replace(year=shipped.valid_until.year + 1)
+    assert rejected(evaluate(calendar=shipped, now=after_coverage)) is RejectionCode.EVENT_CALENDAR_STALE
 
 
 def test_sizing_rejection_propagates() -> None:

@@ -31,6 +31,7 @@ x-env-api: &env-api
   API_PANEL_ORIGINS: '["http://localhost:${CRYPTOINVEST_WEB_PORT:-8088}"]'
   API_DATABASE_USER: cryptoinvest_api
   API_RUNNER_DATA_DIR: /var/lib/cryptoinvest/paper
+  API_CALENDAR_PATH: /var/lib/cryptoinvest/calendar/volatility_events.json
   API_BACKTEST_CACHE_DIR: /var/lib/cryptoinvest/data/cache
   API_BACKTEST_MAX_MEMORY_MB: "1024"
 
@@ -160,6 +161,7 @@ services:
     volumes:
       - paper-data:/var/lib/cryptoinvest/paper
       - cache:/var/lib/cryptoinvest/data/cache
+      - calendar:/var/lib/cryptoinvest/calendar:ro
       - type: tmpfs
         target: /tmp
         tmpfs: {size: 67108864}
@@ -183,7 +185,7 @@ services:
     <<: *hardened
     image: cryptoinvest/runner:${CRYPTOINVEST_TAG:-local}
     build: {context: ., dockerfile: Dockerfile, target: runner}
-    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "${RUNNER_RUN_ID:-paper-local}", "--data-dir", "/var/lib/cryptoinvest/paper", "--json-logs"]
+    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "${RUNNER_RUN_ID:-paper-local}", "--data-dir", "/var/lib/cryptoinvest/paper", "--calendar", "/var/lib/cryptoinvest/calendar/volatility_events.json", "--json-logs"]
     stop_signal: SIGTERM
     # Parada ordenada: o robo preserva os stops das posicoes abertas antes do SIGKILL.
     stop_grace_period: 120s
@@ -197,6 +199,7 @@ services:
       - {source: redis_password, target: redis_password}
     volumes:
       - paper-data:/var/lib/cryptoinvest/paper
+      - calendar:/var/lib/cryptoinvest/calendar:ro
       - type: tmpfs
         target: /tmp
         tmpfs: {size: 67108864}
@@ -211,6 +214,28 @@ services:
       migrate: {condition: service_completed_successfully}
       timescaledb: {condition: service_healthy}
       redis: {condition: service_healthy}
+
+  # Atualiza o calendario de eventos (FOMC/BLS/Deribit, so fontes oficiais publicas) 1x/dia; unico escritor do volume
+  # `calendar` (runner e api so leem). Falha de fonte => arquivo mantido (o gate segue fechado se vencer).
+  calendar-updater:
+    <<: *hardened
+    image: cryptoinvest/runner:${CRYPTOINVEST_TAG:-local}
+    command: ["python", "-m", "engine.runner.calendar_update", "--calendar", "/var/lib/cryptoinvest/calendar/volatility_events.json", "--seed", "/app/config/volatility_events.json", "--loop", "--json-logs"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - calendar:/var/lib/cryptoinvest/calendar
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 16777216}
+    networks: [egress]
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "calendar"]
+      interval: 1h
+      timeout: 10s
+      retries: 1
+      start_period: 5m
 
   # Painel + proxy. TRUSTED_LB_CIDR=127.0.0.1/32: o modo http do nginx exige um balanceador confiavel; aqui nao ha
   # nenhum (o navegador fala direto com o proxy, chegando pelo gateway da rede Docker), entao confiamos so no
@@ -351,6 +376,7 @@ volumes:
   timescale-data:
   redis-data:
   paper-data:
+  calendar:
   cache:
   reports:
 

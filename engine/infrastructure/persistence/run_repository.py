@@ -28,15 +28,21 @@ class RunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def start(self, run: RunRecord) -> None:
-        """Idempotente: religar o mesmo run_id com os mesmos modo/config e aceito; divergente e erro."""
+    async def start(self, run: RunRecord, *, accepted_hash: str | None = None) -> None:
+        """Idempotente: religar o mesmo run_id com os mesmos modo/config e aceito; divergente e erro. O modo
+        nunca muda. `accepted_hash` e um hash de config ja autorizado pela cadeia de versoes (a linha do
+        run e imutavel: o papel do robo so atualiza `ended_at`)."""
         stmt = (
             insert(RunRow).values(**run.model_dump()).on_conflict_do_nothing(index_elements=[RunRow.run_id])
         )
         if affected(await self._session.execute(stmt)) == 1:
             return
         stored = await self.get(run.run_id)
-        if stored is None or (stored.mode, stored.config_hash) != (run.mode, run.config_hash):
+        if (
+            stored is None
+            or stored.mode != run.mode
+            or run.config_hash not in {stored.config_hash, accepted_hash}
+        ):
             raise PersistenceError(f"run {run.run_id} ja existe com modo/config diferentes")
 
     async def finish(self, run_id: str, ended_at: datetime) -> None:

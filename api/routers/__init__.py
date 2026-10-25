@@ -5,6 +5,7 @@ from api.routers import (
     audit,
     auth,
     backtest,
+    calendar,
     control,
     credentials,
     health,
@@ -32,5 +33,6 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     settings.router,
     onboarding.router,
     ai.router,
+    calendar.router,
 ]
 WEBSOCKET_ROUTERS: list[APIRouter] = [ws.router]

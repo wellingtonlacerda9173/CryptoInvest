@@ -207,6 +207,7 @@ class DecisionRow(Base):
         UniqueConstraint("run_id", "decision_key", name="uq_decisions_run_decision_key"),
         Index("ix_decisions_run_decided_at", "run_id", "decided_at"),
         Index("ix_decisions_signal_id", "signal_id"),
+        Index("ix_decisions_symbol_decided_at", "symbol", "decided_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

@@ -10,13 +10,24 @@ import {
   SheetTrigger,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { BOTTOM_ITEMS, MORE_ITEMS } from './nav';
+import { BOTTOM_ITEMS, CALENDAR_ALERT_TEXT, MORE_ITEMS, type CalendarAlert } from './nav';
 import { ThemeToggle } from './ThemeToggle';
 
 const cell =
   'flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-control text-[11px] text-muted no-underline';
 
-export function BottomNav({ alertCount, onLogout }: { alertCount: number; onLogout: () => void }) {
+const dotTone = (alert: NonNullable<CalendarAlert>) =>
+  alert === 'expired' ? 'bg-loss' : 'bg-warn';
+
+export function BottomNav({
+  alertCount,
+  calendarAlert = null,
+  onLogout,
+}: {
+  alertCount: number;
+  calendarAlert?: CalendarAlert;
+  onLogout: () => void;
+}) {
   return (
     <nav
       aria-label="Principal (celular)"
@@ -41,9 +52,22 @@ export function BottomNav({ alertCount, onLogout }: { alertCount: number; onLogo
       ))}
       <Sheet>
         <SheetTrigger asChild>
-          <button type="button" className={cn(cell, 'cursor-pointer border-0 bg-transparent')}>
+          <button
+            type="button"
+            className={cn(cell, 'relative cursor-pointer border-0 bg-transparent')}
+          >
             <Ellipsis className="size-5" aria-hidden="true" />
             Mais
+            {calendarAlert ? (
+              <span
+                className={cn(
+                  'absolute right-3 top-1.5 size-2.5 rounded-full',
+                  dotTone(calendarAlert),
+                )}
+              >
+                <span className="sr-only">{CALENDAR_ALERT_TEXT[calendarAlert]}</span>
+              </span>
+            ) : null}
           </button>
         </SheetTrigger>
         <SheetContent>
@@ -66,6 +90,11 @@ export function BottomNav({ alertCount, onLogout }: { alertCount: number; onLogo
                   >
                     <Icon className="size-5" aria-hidden="true" />
                     {label}
+                    {to === '/calendario' && calendarAlert ? (
+                      <span className={cn('ml-auto size-2.5 rounded-full', dotTone(calendarAlert))}>
+                        <span className="sr-only">{CALENDAR_ALERT_TEXT[calendarAlert]}</span>
+                      </span>
+                    ) : null}
                   </NavLink>
                 </SheetClose>
               </li>

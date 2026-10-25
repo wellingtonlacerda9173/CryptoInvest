@@ -37,6 +37,8 @@ export const makeCandles = (patch: Partial<Candles> = {}): Candles => ({
   volume_24h: 24000,
   last_decision: 'Esperou: sem sinal.',
   blind_since: null,
+  decisions: [],
+  decisions_truncated: false,
   ...patch,
 });
 

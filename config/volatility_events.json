@@ -1,6 +1,18 @@
 {
-  "loaded_at": null,
-  "valid_until": null,
+  "loaded_at": "2026-10-25T19:21:00Z",
+  "valid_until": "2027-01-15T23:59:59Z",
   "acknowledged_no_events": false,
-  "windows": []
+  "windows": [
+    {"start": "2026-10-28T18:00:00Z", "end": "2026-10-28T19:30:00Z", "label": "FOMC decisao de juros (Out)"},
+    {"start": "2026-10-30T07:00:00Z", "end": "2026-10-30T09:00:00Z", "label": "Deribit vencimento mensal BTC/ETH (Out)"},
+    {"start": "2026-11-06T13:30:00Z", "end": "2026-11-06T14:30:00Z", "label": "EUA payroll (Out)"},
+    {"start": "2026-11-10T13:30:00Z", "end": "2026-11-10T14:30:00Z", "label": "EUA CPI (Out)"},
+    {"start": "2026-11-27T07:00:00Z", "end": "2026-11-27T09:00:00Z", "label": "Deribit vencimento mensal BTC/ETH (Nov)"},
+    {"start": "2026-12-04T13:30:00Z", "end": "2026-12-04T14:30:00Z", "label": "EUA payroll (Nov)"},
+    {"start": "2026-12-09T19:00:00Z", "end": "2026-12-09T20:30:00Z", "label": "FOMC decisao de juros (Dez)"},
+    {"start": "2026-12-10T13:30:00Z", "end": "2026-12-10T14:30:00Z", "label": "EUA CPI (Nov)"},
+    {"start": "2026-12-25T07:00:00Z", "end": "2026-12-25T09:00:00Z", "label": "Deribit vencimento trimestral BTC/ETH (Dez)"},
+    {"start": "2027-01-08T13:30:00Z", "end": "2027-01-08T14:30:00Z", "label": "EUA payroll (Dez)"},
+    {"start": "2027-01-13T13:30:00Z", "end": "2027-01-13T14:30:00Z", "label": "EUA CPI (Dez)"}
+  ]
 }

@@ -1,0 +1,69 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prototipo Calendario</title>
+<style>
+:root{--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--border:#c5cdd8;--border-strong:#76859a;--text:#0f172a;--muted:#475467;--gain:#046c3f;--gain-bg:#e3f6ea;--loss:#b42318;--loss-bg:#fde8e7;--warn:#8a4b00;--warn-bg:#fff1d6;--info:#1d4ed8;--info-bg:#e6eeff;--primary:#1d4ed8}
+:root[data-theme=dark]{--bg:#0b0f14;--surface:#121923;--surface-2:#1a2330;--border:#2b3747;--border-strong:#6b7c93;--text:#e8edf3;--muted:#a3afbf;--gain:#4ade80;--gain-bg:#0f2a1c;--loss:#ff7b7b;--loss-bg:#33161a;--warn:#fbbf24;--warn-bg:#33270b;--info:#7db4ff;--info-bg:#11233f;--primary:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+main{max-width:880px;margin:0 auto;padding:20px 16px 48px;display:grid;gap:16px}
+#app{display:grid;gap:16px}
+h1{font-size:24px;margin:0}.sub{color:var(--muted);margin:2px 0 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px}
+.hero{display:flex;gap:14px;align-items:flex-start;border:2px solid;border-radius:14px;padding:18px}
+.hero .ic{flex:none;width:52px;height:52px;border-radius:14px;border:2px solid;background:var(--surface);display:grid;place-items:center;font-size:26px;font-weight:700}
+.hero h2{margin:0;font-size:20px;line-height:1.25}.hero p{margin:6px 0 0}
+.hero.ok{border-color:var(--gain);background:var(--gain-bg)}.hero.ok .ic{color:var(--gain);border-color:var(--gain)}
+.hero.warn{border-color:var(--warn);background:var(--warn-bg)}.hero.warn .ic{color:var(--warn);border-color:var(--warn)}
+.hero.bad{border-color:var(--loss);background:var(--loss-bg)}.hero.bad .ic{color:var(--loss);border-color:var(--loss)}
+.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;margin-top:12px;border-radius:10px;background:var(--primary);color:#fff;font-weight:600;text-decoration:none}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.fact b{display:block;font-size:12px;color:var(--muted);font-weight:600}.fact span{font-size:16px;font-weight:600}.fact small{display:block;color:var(--muted)}
+.now{display:flex;gap:10px;align-items:center;border-left:4px solid var(--warn);background:var(--warn-bg)}
+.now.free{border-left-color:var(--gain);background:var(--surface)}
+h3{margin:0 0 4px;font-size:17px}
+ol{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}
+li.ev{border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--surface);display:grid;gap:4px}
+li.ev.active{border-color:var(--warn);border-width:2px;background:var(--warn-bg)}
+.top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.when{font-weight:700;font-size:16px}.utc{font-size:12px;color:var(--muted)}
+.tag{display:inline-flex;gap:6px;align-items:center;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;border:1px solid var(--border-strong);background:var(--surface-2)}
+.tag.warn{border-color:var(--warn);color:var(--warn);background:var(--surface)}
+.why{color:var(--muted);margin:0;font-size:14px}
+.rel{font-size:13px;color:var(--muted)}
+details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
+a:focus-visible,summary:focus-visible{outline:3px solid var(--info);outline-offset:2px}
+</style></head><body><main>
+<header><h1>Calendário de eventos</h1><p class="sub">O robô fica parado perto de notícias que sacodem o mercado. Aqui você vê quando.</p></header>
+<div id="app"></div>
+</main>
+<script>
+const q=new URLSearchParams(location.search);const st=q.get('estado')||'ok';
+if(q.get('tema')!=='light')document.documentElement.dataset.theme='dark';
+const tz='America/Sao_Paulo';
+const f=(d,o)=>new Intl.DateTimeFormat('pt-BR',{timeZone:tz,...o}).format(d);
+const NOW=new Date('2026-10-28T17:00:00Z');
+const evs=[
+ {n:'Decisão de juros dos EUA (FOMC)',k:'FOMC',s:'2026-10-28T17:30:00Z',e:'2026-10-28T20:30:00Z',src:'Federal Reserve'},
+ {n:'Inflação dos EUA (CPI)',k:'CPI',s:'2026-11-12T13:00:00Z',e:'2026-11-12T15:00:00Z',src:'BLS'},
+ {n:'Emprego nos EUA (payroll)',k:'PAYROLL',s:'2026-11-06T12:30:00Z',e:'2026-11-06T14:30:00Z',src:'BLS'},
+ {n:'Vencimento de opções (Deribit)',k:'DERIBIT',s:'2026-11-27T07:30:00Z',e:'2026-11-27T09:30:00Z',src:'Deribit'}
+].sort((a,b)=>a.s>b.s?1:-1);
+const why={FOMC:'Os EUA anunciam os juros. Todo o mercado se mexe de uma vez.',CPI:'Número da inflação nos EUA. Pode virar o preço em segundos.',PAYROLL:'Relatório de empregos nos EUA. Costuma causar saltos bruscos.',DERIBIT:'Dia em que muitos contratos vencem. Os preços podem oscilar sem aviso.'};
+const lbl={FOMC:'Juros EUA',CPI:'Inflação EUA',PAYROLL:'Emprego EUA',DERIBIT:'Opções'};
+const hero={
+ ok:['ok','✓','Calendário em dia','Calendário válido por mais 46 dias. Nenhuma ação sua é necessária.',''],
+ warn:['warn','!','Atenção: calendário vence em 9 dias','Depois disso o robô para de abrir operações. As atuais continuam protegidas. A atualização é automática; se não resolver até lá, avise o suporte.',''],
+ bad:['bad','✕','Robô travado: calendário vencido','Ele não abre novas operações até o calendário ser atualizado. As posições abertas continuam com stop. A atualização é automática e já falhou; chame o suporte.','<a class="btn" href="#">Ver como pedir ajuda</a>']}[st];
+const days={ok:46,warn:9,bad:0}[st];
+const upd={ok:['Atualizado hoje às 04:00','Sem mudanças: o calendário já estava em dia.'],warn:['Tentativa hoje às 04:00 falhou','Nova tentativa automática em cerca de 6 horas.'],bad:['Tentativa hoje às 04:00 falhou','Última atualização bem-sucedida: 12 de setembro.']}[st];
+const active=st!=='bad'?evs[0]:null;
+const list=st==='bad'?[]:evs;
+const hm={hour:'2-digit',minute:'2-digit'};
+let h=`<section class="hero ${hero[0]}" role="status"><div class="ic" aria-hidden="true">${hero[1]}</div><div><h2>${hero[2]}</h2><p>${hero[3]}</p>${hero[4]}</div></section>`;
+h+=`<section class="card now ${active?'':'free'}"><div aria-hidden="true" style="font-size:22px">${active?'⏸':'▶'}</div><div><h3>${active?'O robô está parado agora':(st==='bad'?'O robô está parado agora':'Sem evento por perto')}</h3><p class="why">${active?`Por causa de “${active.n}”. Volta a operar às ${f(new Date(active.e),hm)} (horário de Brasília).`:(st==='bad'?'Por segurança, até o calendário voltar.':'Ele opera normalmente.')}</p></div></section>`;
+h+=`<section class="card facts"><div class="fact"><b>Calendário vale até</b><span>${f(new Date('2026-12-13T00:00:00Z'),{day:'2-digit',month:'long',year:'numeric'})}</span><small>${days>0?days+' dias restantes':'Venceu'}</small></div><div class="fact"><b>Última atualização automática</b><span>${upd[0]}</span><small>${upd[1]}</small></div><div class="fact"><b>Seu fuso</b><span>Brasília (UTC−3)</span><small>Horários convertidos para você</small></div></section>`;
+h+=`<section class="card"><h3>Próximos eventos</h3><p class="why">Em cada um, o robô para antes e só volta depois da janela.</p>`;
+h+=list.length?'<ol>'+list.map((e,i)=>{const a=e===active;const s=new Date(e.s),x=new Date(e.e);const day=f(s,{weekday:'short',day:'2-digit',month:'short'});const t=f(s,hm)+' às '+f(x,hm);const dd=Math.round((s-NOW)/864e5);
+return `<li class="ev ${a?'active':''}"><div class="top"><span class="when">${day}, ${t}</span><span class="tag ${a?'warn':''}">${a?'⏸ Robô parado agora':lbl[e.k]}</span></div><strong>${e.n}</strong><p class="why">${why[e.k]}</p><div class="top"><span class="rel">${a?'Em andamento':'Em '+dd+' dias'} · Fonte: ${e.src}</span><span class="utc">${s.toISOString().slice(0,16).replace('T',' ')}–${x.toISOString().slice(11,16)} UTC</span></div></li>`}).join('')+'</ol>':`<p class="why" style="margin-top:12px"><b>Nenhum evento para mostrar.</b> Sem calendário válido o robô não opera. Assim que ele for atualizado, os eventos aparecem aqui.</p>`;
+h+=`</section><details class="card"><summary>Por que o robô precisa deste calendário?</summary><p class="why">Em horários de notícias fortes o preço dá saltos que passam por cima do stop. Por isso o robô não abre operações perto deles. Sem calendário em dia, ele não sabe quando as notícias saem, então prefere não operar.</p></details>`;
+document.getElementById('app').innerHTML=h;
+</script></body></html>

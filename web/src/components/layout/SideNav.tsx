@@ -4,7 +4,7 @@ import { Link, useMatch } from 'react-router-dom';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useIsDesktop } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
-import { NAV_ITEMS } from './nav';
+import { CALENDAR_ALERT_TEXT, NAV_ITEMS, type CalendarAlert } from './nav';
 
 // Link com string de classe (e nao funcao): o Tooltip (Slot) so mescla className em texto.
 function ActiveLink({
@@ -35,13 +35,20 @@ interface Props {
   collapsed: boolean;
   onToggle: () => void;
   alertCount: number;
+  calendarAlert?: CalendarAlert;
   onLogout: () => void;
 }
 
 const itemBase =
   'relative flex min-h-11 items-center gap-3 rounded-control text-muted no-underline hover:bg-surface-2 hover:text-text';
 
-export function SideNav({ collapsed, onToggle, alertCount, onLogout }: Props) {
+export function SideNav({
+  collapsed,
+  onToggle,
+  alertCount,
+  calendarAlert = null,
+  onLogout,
+}: Props) {
   const desktop = useIsDesktop();
   const rail = collapsed || !desktop;
 
@@ -110,6 +117,17 @@ export function SideNav({ collapsed, onToggle, alertCount, onLogout }: Props) {
                           <span className="sr-only"> alerta(s)</span>
                         </span>
                       )
+                    ) : null}
+                    {to === '/calendario' && calendarAlert ? (
+                      <span
+                        className={cn(
+                          'size-2.5 rounded-full',
+                          calendarAlert === 'expired' ? 'bg-loss' : 'bg-warn',
+                          rail ? 'absolute right-2 top-2' : 'ml-auto',
+                        )}
+                      >
+                        <span className="sr-only">{CALENDAR_ALERT_TEXT[calendarAlert]}</span>
+                      </span>
                     ) : null}
                   </ActiveLink>,
                 )}

@@ -1,10 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { ChartCandlestick, CircleCheck, TriangleAlert, WifiOff } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { KEYS } from '@/api/queries';
 import { TIMEFRAMES, type Timeframe } from '@/api/marketSchemas';
 import { CandleChart } from '@/components/kit/CandleChart';
 import { CardError } from '@/components/kit/CardError';
 import { Chip } from '@/components/kit/Chip';
+import { LivePrice } from '@/components/kit/LivePrice';
 import { EmptyState } from '@/components/kit/EmptyState';
 import { GlossaryTerm } from '@/components/kit/GlossaryTerm';
 import { SimulatedTag } from '@/components/kit/SimulatedTag';
@@ -13,8 +15,8 @@ import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabeledSelect } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { directionOf, formatClock, formatNumber, formatPercent, formatSigned } from '@/lib/format';
-import { cn } from '@/lib/utils';
+import { TIER_GLYPH, decisionSentence } from '@/lib/chartDecisions';
+import { formatClock, formatNumber, formatSigned } from '@/lib/format';
 import { useMercado } from './mercado/useMercado';
 
 const TF_LABEL: Record<Timeframe, string> = {
@@ -40,7 +42,6 @@ export default function MercadoPage() {
   const m = useMercado();
   const { candles } = m;
   const data = candles.data;
-  const dir = directionOf(data?.change_24h_pct ?? 0);
 
   return (
     <>
@@ -93,6 +94,16 @@ export default function MercadoPage() {
           </div>
         ) : null}
 
+        {m.stale && data && data.candles.length > 0 ? (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-xl border border-warn bg-warn-bg px-3.5 py-2.5 text-sec"
+          >
+            <TriangleAlert className="size-4 shrink-0 text-warn" aria-hidden="true" />
+            <span>{m.stale}</span>
+          </div>
+        ) : null}
+
         {data?.blind_since ? (
           <div
             role="alert"
@@ -107,29 +118,21 @@ export default function MercadoPage() {
         ) : null}
 
         {data ? (
-          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
-            <span className="text-kpi font-bold tabular-nums">
-              {data.last_price !== null ? formatNumber(data.last_price) : '—'}
-            </span>
-            {data.change_24h_pct !== null ? (
-              <span
-                className={cn(
-                  'font-semibold tabular-nums',
-                  dir === 'up' ? 'text-gain' : dir === 'down' ? 'text-loss' : 'text-muted',
-                )}
-              >
-                <span aria-hidden="true">{dir === 'up' ? '▲ ' : dir === 'down' ? '▼ ' : ''}</span>
-                {formatPercent(data.change_24h_pct, 2, true)} em 24 h
-              </span>
-            ) : null}
-            {data.volume_24h !== null ? (
-              <span className="text-sec text-muted tabular-nums">
-                Volume 24 h: {formatNumber(data.volume_24h, 0)}
-              </span>
-            ) : null}
-            <span className="text-sec text-muted">
-              Atualizado às {formatClock(candles.dataUpdatedAt)}
-            </span>
+          <div className="flex flex-col gap-2">
+            <LivePrice
+              symbol={m.symbol}
+              symbols={m.symbols}
+              fallbackPrice={data.last_price}
+              fallbackChangePct={data.change_24h_pct}
+            />
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sec text-muted">
+              {data.volume_24h !== null ? (
+                <span className="tabular-nums">
+                  Volume 24 h: {formatNumber(data.volume_24h, 0)}
+                </span>
+              ) : null}
+              <span>Gráfico atualizado às {formatClock(candles.dataUpdatedAt)}</span>
+            </div>
           </div>
         ) : null}
 
@@ -144,6 +147,10 @@ export default function MercadoPage() {
           <label className="flex items-center gap-2 text-sec">
             <Checkbox checked={m.showLevels} onCheckedChange={(v) => m.setShowLevels(v === true)} />
             Stops e alvos
+          </label>
+          <label className="flex items-center gap-2 text-sec">
+            <Checkbox checked={m.showQuiet} onCheckedChange={(v) => m.setShowQuiet(v === true)} />
+            Mostrar também &quot;sem sinal&quot;
           </label>
         </div>
 
@@ -165,19 +172,92 @@ export default function MercadoPage() {
           <>
             <CandleChart
               candles={data.candles}
+              live={m.view}
+              decisions={m.decisionGroups}
+              fitKey={`${m.symbol}|${m.timeframe}`}
               markers={data.markers}
               levels={m.levels}
               showElephants={m.showElephants}
               label={m.summary}
             />
-            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-cap text-muted">
-              <li>▲ Entrada</li>
-              <li>▼ Saída</li>
-              <li>■ Stop</li>
-              <li>● Alvo</li>
-              <li>E Barra elefante (contorno âmbar)</li>
-              <li>Vela vazada: fechou em alta. Vela cheia: fechou em baixa.</li>
-            </ul>
+            <div className="flex flex-col gap-1.5 text-cap text-muted">
+              <ul className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Como ler as velas">
+                <li>▲ Entrada</li>
+                <li>▼ Saída</li>
+                <li>■ Stop</li>
+                <li>● Alvo</li>
+                <li>E Barra elefante (contorno âmbar)</li>
+                <li>Vela vazada: fechou em alta. Vela cheia: fechou em baixa.</li>
+                <li>
+                  <strong className="font-semibold text-sec">Vela atual</strong> (azul, com a seta):
+                  ainda não fechou e acompanha a cotação ao vivo. A linha pontilhada
+                  &quot;Agora&quot; é o preço neste instante.
+                </li>
+              </ul>
+              <ul
+                className="flex flex-wrap gap-x-4 gap-y-1"
+                aria-label="Faixa de decisões, embaixo do gráfico"
+              >
+                <li className="font-semibold text-sec">Faixa de decisões do robô:</li>
+                <li>
+                  <span className="text-gain" aria-hidden="true">
+                    ●
+                  </span>{' '}
+                  Entrou
+                </li>
+                <li>
+                  <span className="text-warn" aria-hidden="true">
+                    ■
+                  </span>{' '}
+                  Viu uma oportunidade, mas não entrou
+                </li>
+                <li>
+                  <span aria-hidden="true">· </span>Sem sinal (aparece se você marcar a opção acima)
+                </li>
+              </ul>
+              <p>Toque (ou passe o mouse) numa marca da faixa para ler o que o robô decidiu.</p>
+            </div>
+            {data.decisions_truncated ? (
+              <p className="text-cap text-muted">
+                Há muitas decisões neste período: o gráfico mostra as 200 mais recentes.
+              </p>
+            ) : null}
+            <section aria-labelledby="dec-t" className="flex flex-col gap-1">
+              <h3 id="dec-t" className="text-sec font-semibold">
+                Últimas decisões neste gráfico
+              </h3>
+              {m.recentDecisions.length > 0 ? (
+                <ul className="flex flex-col gap-1 text-sec">
+                  {m.recentDecisions.map((d) => (
+                    <li key={d.id}>
+                      <span
+                        aria-hidden="true"
+                        className={
+                          d.tier === 'entered'
+                            ? 'text-gain'
+                            : d.tier === 'blocked'
+                              ? 'text-warn'
+                              : ''
+                        }
+                      >
+                        {d.tier === 'blocked' ? '■' : TIER_GLYPH[d.tier]}{' '}
+                      </span>
+                      <span className="tabular-nums">{stamp(d.t)}</span> · {decisionSentence(d)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sec text-muted">
+                  Nenhuma decisão relevante neste período. Ficar parado também é uma decisão.
+                </p>
+              )}
+              <Link
+                to={`/decisoes?par=${encodeURIComponent(m.symbol ?? '')}`}
+                className="text-sec font-semibold underline underline-offset-2"
+              >
+                Ver todas as decisões na tela Decisões ao vivo
+              </Link>
+            </section>
           </>
         ) : null}
       </Card>

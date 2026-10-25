@@ -1,7 +1,9 @@
 import { http as rest, HttpResponse } from 'msw';
 import type { FieldChange, SectionName, SettingsVersion } from '@/api/settingsSchemas';
 import { makeJob, makeReport } from '@/test/backtestData';
-import { makeCandles, makePerformance, makeTrade, makeTradePage, LOSS } from '@/test/marketData';
+import { calendarVariantFromSearch, makeCalendar } from '@/test/calendarData';
+import { chartVariantFromSearch, makeChartMock } from './marketChart';
+import { makePerformance, makeTrade, makeTradePage, LOSS } from '@/test/marketData';
 import {
   DECREASE_CHANGE,
   INCREASE_CHANGE,
@@ -83,9 +85,36 @@ const changesFor = (section: string, value: Record<string, unknown>): FieldChang
 export function extraHandlers(h: MockHelpers) {
   const ok = (body: unknown, init?: ResponseInit) => HttpResponse.json(body as never, init);
   return [
+    rest.get('/api/market/candles', ({ request }) =>
+      h.authed(() => {
+        const q = new URL(request.url).searchParams;
+        return makeChartMock(
+          chartVariantFromSearch(globalThis.location?.search ?? ''),
+          q.get('quiet') === 'true',
+          q.get('symbol') ?? 'BTC/USDT',
+        );
+      })(),
+    ),
     rest.get(
-      '/api/market/candles',
-      h.authed(() => makeCandles()),
+      '/api/calendar',
+      h.authed(() => makeCalendar(calendarVariantFromSearch(globalThis.location?.search ?? ''))),
+    ),
+    rest.get('/api/market/ticker', ({ request }) =>
+      h.authed(() => {
+        const asked = new URL(request.url).searchParams.get('symbols')?.split(',') ?? [];
+        const symbols = asked.filter((s) => s === 'BTC/USDT' || s === 'ETH/USDT');
+        const wobble = 1 + Math.sin(Date.now() / 2_000) * 0.0008;
+        return {
+          quotes: symbols.map((symbol) => ({
+            symbol,
+            price: (symbol.startsWith('BTC') ? 64_000 : 3_100) * wobble,
+            change_24h_pct: 1.2,
+            as_of: new Date().toISOString(),
+            age_seconds: 0.5,
+            stale: false,
+          })),
+        };
+      })(),
     ),
     rest.get(
       '/api/trades',

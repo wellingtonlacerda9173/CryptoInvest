@@ -7,9 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
+from time import monotonic
 from typing import Any, Literal, cast
 
-from sqlalchemy import Select, case, func, select, text
+from sqlalchemy import Select, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.container import Container
@@ -19,6 +20,7 @@ from api.schemas_trading import (
     AvoidedOut,
     CandleOut,
     CandlesOut,
+    ChartDecisionOut,
     DecisionOut,
     DecisionPage,
     DecisionSummaryOut,
@@ -66,6 +68,9 @@ MAX_EXPORT_ROWS = 20_000
 SMALL_SAMPLE = 30
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 MODE_LABEL = {"paper": "PAPER (simulado)", "live": "LIVE (dinheiro real)", "backtest": "BACKTEST"}
+
+
+_TICKER_KEY = "ticker_symbols"
 
 
 def _f(value: Decimal | float | None) -> float | None:
@@ -132,6 +137,21 @@ class TradingReads:
         async with self._c.sessions() as db:
             latest = await ConfigRepository(db).latest()
         return None if latest is None else latest.document.risk.pair_pause_hours
+
+    async def ticker_symbols(self) -> frozenset[str]:
+        """Pares que o usuario realmente acompanha: do robo + posicoes abertas (cache 30 s)."""
+        cached = self._c.gate_cache.get(_TICKER_KEY)
+        if cached is not None and monotonic() - cached[0] < 30:
+            return cast(frozenset[str], cached[1])
+        snapshot = await self._snapshot()
+        async with self._c.sessions() as db:
+            latest = await ConfigRepository(db).latest()
+            run = await latest_run(db, snapshot.run_id)
+            held = [] if run is None else [p.symbol for p in await open_position_rows(db, run.run_id)]
+        configured = [] if latest is None else list(latest.document.pairs.symbols)
+        symbols = frozenset([*configured, *held])
+        self._c.gate_cache[_TICKER_KEY] = (monotonic(), symbols)
+        return symbols
 
     # ------------------------------------------------------------------ saldo e P&L
 
@@ -502,7 +522,9 @@ class TradingReads:
 
     # ------------------------------------------------------------------ mercado
 
-    async def candles(self, *, symbol: str, timeframe: Timeframe, limit: int) -> CandlesOut:
+    async def candles(
+        self, *, symbol: str, timeframe: Timeframe, limit: int, quiet: bool = False
+    ) -> CandlesOut:
         snapshot = await self._snapshot()
         warmup = ElephantBarConfig().min_history + 5
         async with self._c.sessions() as db:
@@ -538,7 +560,19 @@ class TradingReads:
                 .order_by(DecisionRow.id.desc())
                 .limit(1)
             )
-        shown = rows[warmup:] if len(rows) > limit else rows
+            shown = rows[warmup:] if len(rows) > limit else rows
+            chart_decisions, truncated = (
+                await _chart_decisions(
+                    db,
+                    symbol,
+                    shown[0].open_time,
+                    run_id=None if run is None else run.run_id,
+                    quiet=quiet,
+                    pause_hours=None if latest is None else latest.document.risk.pair_pause_hours,
+                )
+                if shown
+                else ([], False)
+            )
         config = latest.document.strategies.elephant.detector if latest else ElephantBarConfig()
         domain = [_candle(r, timeframe) for r in rows]
         marks = await asyncio.to_thread(_elephants, domain, shown[0].open_time if shown else None, config)
@@ -571,6 +605,8 @@ class TradingReads:
             else self._last_decision_text(
                 decision, None if latest is None else latest.document.risk.pair_pause_hours
             ),
+            decisions=chart_decisions,
+            decisions_truncated=truncated,
         )
 
     # ------------------------------------------------------------------ glossário
@@ -695,6 +731,52 @@ def _decision(row: DecisionRow, mode: str, pause_hours: int | None = None) -> De
         strategy=row.strategy,
         confidence=row.confidence,
         signal=row.signal,
+    )
+
+
+CHART_DECISIONS_MAX = 200
+_QUIET_CODES = tuple(code for code, reason in REASONS.items() if reason.kind == "waited")
+
+
+async def _chart_decisions(
+    db: AsyncSession,
+    symbol: str,
+    since: datetime,
+    *,
+    run_id: str | None,
+    quiet: bool,
+    pause_hours: int | None,
+) -> tuple[list[ChartDecisionOut], bool]:
+    stmt = (
+        select(DecisionRow)
+        .where(DecisionRow.symbol == symbol, DecisionRow.decided_at >= since)
+        .order_by(DecisionRow.decided_at.desc(), DecisionRow.id.desc())
+        .limit(CHART_DECISIONS_MAX + 1)
+    )
+    if run_id is not None:
+        stmt = stmt.where(DecisionRow.run_id == run_id)
+    else:
+        stmt = stmt.join(RunRow, RunRow.run_id == DecisionRow.run_id).where(RunRow.mode == "paper")
+    if not quiet:
+        stmt = stmt.where(or_(DecisionRow.traded.is_(True), DecisionRow.code.not_in(_QUIET_CODES)))
+    rows = list((await db.scalars(stmt)).all())
+    items = [_chart_decision(r, pause_hours) for r in rows[:CHART_DECISIONS_MAX]][::-1]
+    return items, len(rows) > CHART_DECISIONS_MAX
+
+
+def _chart_decision(row: DecisionRow, pause_hours: int | None) -> ChartDecisionOut:
+    reason = translate(row.code, traded=row.traded, pair_pause_hours=pause_hours)
+    tier: Literal["entered", "blocked", "quiet"] = (
+        "entered" if row.traded else "blocked" if reason.kind == "refused" else "quiet"
+    )
+    return ChartDecisionOut(
+        id=row.id,
+        t=row.decided_at,
+        tier=tier,
+        label="Entrou" if row.traded else reason.label,
+        text=reason.text,
+        code=row.code,
+        strategy=row.strategy,
     )
 
 

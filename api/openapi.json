@@ -1330,6 +1330,195 @@
         "title": "BotStatusOut",
         "type": "object"
       },
+      "CalendarEventOut": {
+        "additionalProperties": false,
+        "properties": {
+          "block_end": {
+            "description": "Fim EFETIVO da pausa (inclusivo): fim da janela mais a margem.",
+            "format": "date-time",
+            "title": "Block End",
+            "type": "string"
+          },
+          "block_start": {
+            "description": "Inicio EFETIVO da pausa do robo: inicio da janela menos a margem.",
+            "format": "date-time",
+            "title": "Block Start",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "kind": {
+            "default": "other",
+            "enum": [
+              "fomc",
+              "cpi",
+              "payroll",
+              "deribit",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "label",
+          "source",
+          "block_start",
+          "block_end"
+        ],
+        "title": "CalendarEventOut",
+        "type": "object"
+      },
+      "CalendarOut": {
+        "additionalProperties": false,
+        "properties": {
+          "days_remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dias inteiros de cobertura restantes (0 se vencido).",
+            "title": "Days Remaining"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ultima execucao do atualizador que terminou bem (atualizou ou confirmou).",
+            "title": "Last Success At"
+          },
+          "last_update": {
+            "$ref": "#/components/schemas/CalendarUpdateOut"
+          },
+          "loaded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaded At"
+          },
+          "margin_after_minutes": {
+            "description": "Margem de pausa depois de cada evento, em uso pelo robo.",
+            "title": "Margin After Minutes",
+            "type": "integer"
+          },
+          "margin_before_minutes": {
+            "description": "Margem de pausa antes de cada evento, em uso pelo robo.",
+            "title": "Margin Before Minutes",
+            "type": "integer"
+          },
+          "now": {
+            "description": "Relogio do servidor: base para dias restantes e janela ativa.",
+            "format": "date-time",
+            "title": "Now",
+            "type": "string"
+          },
+          "state": {
+            "description": "ok; expiring (menos de 14 dias de cobertura); expired (sem cobertura).",
+            "enum": [
+              "ok",
+              "expiring",
+              "expired"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "upcoming": {
+            "description": "Proximas janelas de eventos (ate 10), ordenadas por inicio; inclui as ainda em pausa.",
+            "items": {
+              "$ref": "#/components/schemas/CalendarEventOut"
+            },
+            "title": "Upcoming",
+            "type": "array"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          }
+        },
+        "required": [
+          "state",
+          "now",
+          "margin_before_minutes",
+          "margin_after_minutes",
+          "upcoming",
+          "last_update"
+        ],
+        "title": "CalendarOut",
+        "type": "object"
+      },
+      "CalendarUpdateOut": {
+        "additionalProperties": false,
+        "properties": {
+          "attempted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempted At"
+          },
+          "result": {
+            "default": "never",
+            "enum": [
+              "updated",
+              "unchanged",
+              "rejected",
+              "failed",
+              "never"
+            ],
+            "title": "Result",
+            "type": "string"
+          }
+        },
+        "title": "CalendarUpdateOut",
+        "type": "object"
+      },
       "CandleOut": {
         "additionalProperties": false,
         "properties": {
@@ -1402,6 +1591,18 @@
               }
             ],
             "title": "Change 24H Pct"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ChartDecisionOut"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "decisions_truncated": {
+            "default": false,
+            "title": "Decisions Truncated",
+            "type": "boolean"
           },
           "last_decision": {
             "anyOf": [
@@ -1518,6 +1719,64 @@
           "new_password"
         ],
         "title": "ChangePasswordRequest",
+        "type": "object"
+      },
+      "ChartDecisionOut": {
+        "additionalProperties": false,
+        "description": "Decisao do robo para desenhar no grafico. `quiet` = sem sinal (so vem quando pedido).",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy"
+          },
+          "t": {
+            "format": "date-time",
+            "title": "T",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "entered",
+              "blocked",
+              "quiet"
+            ],
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "t",
+          "tier",
+          "label",
+          "text",
+          "code",
+          "strategy"
+        ],
+        "title": "ChartDecisionOut",
         "type": "object"
       },
       "CodeRequest": {
@@ -5672,6 +5931,64 @@
         "title": "StopRequest",
         "type": "object"
       },
+      "TickerOut": {
+        "additionalProperties": false,
+        "description": "Cotacao ao vivo so para exibir. Par ausente de `quotes` = sem cotacao ao vivo agora.",
+        "properties": {
+          "quotes": {
+            "items": {
+              "$ref": "#/components/schemas/TickerQuoteOut"
+            },
+            "title": "Quotes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "quotes"
+        ],
+        "title": "TickerOut",
+        "type": "object"
+      },
+      "TickerQuoteOut": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "title": "Age Seconds",
+            "type": "number"
+          },
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "change_24h_pct": {
+            "title": "Change 24H Pct",
+            "type": "number"
+          },
+          "price": {
+            "title": "Price",
+            "type": "number"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "price",
+          "change_24h_pct",
+          "as_of",
+          "age_seconds",
+          "stale"
+        ],
+        "title": "TickerQuoteOut",
+        "type": "object"
+      },
       "Timeframe": {
         "enum": [
           "1m",
@@ -9273,6 +9590,137 @@
         ]
       }
     },
+    "/calendar": {
+      "get": {
+        "operationId": "getEventCalendar",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Calendario de eventos: proximas janelas, cobertura e ultima atualizacao automatica",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
     "/control/commands": {
       "get": {
         "operationId": "listCommands",
@@ -12317,6 +12765,16 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "quiet",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Quiet",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -12442,6 +12900,152 @@
           }
         ],
         "summary": "Velas do par (Timescale) com marcadores de barras elefante, entradas, saídas, stops e alvos",
+        "tags": [
+          "trading"
+        ]
+      }
+    },
+    "/market/ticker": {
+      "get": {
+        "operationId": "getTicker",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "symbols",
+            "required": true,
+            "schema": {
+              "examples": [
+                "BTC/USDT,ETH/USDT"
+              ],
+              "pattern": "^[A-Z0-9]{2,12}/[A-Z0-9]{2,12}(,[A-Z0-9]{2,12}/[A-Z0-9]{2,12}){0,7}$",
+              "title": "Symbols",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TickerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Cotacao ao vivo (so visual) com cache curto; se a corretora falhar, a lista vem vazia",
         "tags": [
           "trading"
         ]

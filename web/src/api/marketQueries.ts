@@ -5,7 +5,14 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { API_BASE, ApiError, http } from './http';
-import { candlesSchema, performanceSchema, tradePageSchema, type Timeframe } from './marketSchemas';
+import {
+  candlesSchema,
+  performanceSchema,
+  tickerSchema,
+  tradePageSchema,
+  type Timeframe,
+} from './marketSchemas';
+import { tickerSymbols } from '@/lib/ticker';
 import { KEYS, useBotStatus } from './queries';
 import { decisionPageSchema, type DecisionPage } from './schemas';
 
@@ -24,17 +31,38 @@ const queryString = (params: Record<string, string | number | boolean | null | u
   return text ? `?${text}` : '';
 };
 
-export const useCandles = (symbol: string | undefined, timeframe: Timeframe, limit = 300) =>
+export const useCandles = (
+  symbol: string | undefined,
+  timeframe: Timeframe,
+  limit = 300,
+  quiet = false,
+) =>
   useQuery({
-    queryKey: [...KEYS.candles, symbol, timeframe, limit],
+    queryKey: [...KEYS.candles, symbol, timeframe, limit, quiet],
     queryFn: ({ signal }) =>
-      http(`/market/candles${queryString({ symbol, timeframe, limit })}`, {
-        schema: candlesSchema,
-        signal,
-      }),
+      http(
+        `/market/candles${queryString({ symbol, timeframe, limit, quiet: quiet || undefined })}`,
+        {
+          schema: candlesSchema,
+          signal,
+        },
+      ),
     enabled: Boolean(symbol),
     refetchInterval: 20_000,
   });
+
+/** Cotacao ao vivo so para exibir (a API consulta a corretora com cache curto). Nao entra nas invalidacoes do WS. */
+export const useTicker = (symbols: readonly string[], first?: string) => {
+  const list = tickerSymbols(symbols, first).join(',');
+  return useQuery({
+    queryKey: ['ticker', list],
+    queryFn: ({ signal }) =>
+      http(`/market/ticker${queryString({ symbols: list })}`, { schema: tickerSchema, signal }),
+    enabled: list !== '',
+    refetchInterval: 3_000,
+    retry: false,
+  });
+};
 
 export const usePerformance = (days: number | null) =>
   useQuery({

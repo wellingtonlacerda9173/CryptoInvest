@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from api.services.backtests import BacktestRunner
     from api.services.launcher import RunnerLauncher
     from api.services.realtime import RealtimeHub
+    from api.services.ticker import TickerService
 
 
 @dataclass(slots=True)
@@ -36,6 +37,7 @@ class Container:
     hub: "RealtimeHub | None" = None
     launcher: "RunnerLauncher | None" = None
     backtests: "BacktestRunner | None" = None
+    ticker: "TickerService | None" = None
     command_key: bytes | None = None
     gate_cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
     user_pressure: UserPressure = field(init=False)

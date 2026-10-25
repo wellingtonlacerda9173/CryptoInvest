@@ -114,6 +114,8 @@ class ApiSettings(BaseSettings):
     command_pump_seconds: float = Field(default=2.0, gt=0)
     # Diretorio de dados do runner (`data/paper`): fallback por arquivo e leitura de `status.json`
     runner_data_dir: Path | None = None
+    # Calendario de eventos mantido pelo atualizador (somente leitura aqui); sem ele o estado e `expired`
+    calendar_path: Path | None = None
     # Comando que inicia o runner (ex.: ["uv","run","python","-m","engine.runner.paper","start"]); sem
     # ele a API nao liga o robo (so o servico externo liga) e responde com instrucoes
     runner_start_command: list[str] | None = None

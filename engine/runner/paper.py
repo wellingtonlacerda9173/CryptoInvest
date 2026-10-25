@@ -38,6 +38,7 @@ from engine.infrastructure.persistence.recovery import load_recovery_state
 from engine.infrastructure.persistence.schema_check import SchemaMismatchError, ensure_schema_current
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.backtest import STRATEGY_NAMES, build_strategies, git_version, parse_values
+from engine.runner.calendar_store import CalendarReloader, resolve_calendar
 from engine.runner.command_channel import (
     RedisCommandSource,
     SignedCommandSource,
@@ -215,11 +216,13 @@ def build_config(args: argparse.Namespace) -> PaperRunConfig:
     )
 
 
-def load_calendar(path: Path) -> EventCalendar:
-    if not path.is_file():
+def load_calendar(path: Path, seed: Path | None = DEFAULT_CALENDAR) -> EventCalendar:
+    """Melhor entre o arquivo mutavel (atualizador) e a semente da imagem; nenhum valido: sem cobertura."""
+    calendar = resolve_calendar(path, seed)
+    if calendar is None:
         log.error("event_calendar_missing", path=str(path), effect="sem cobertura: entradas recusadas")
         return EventCalendar()
-    return EventCalendar.load(path)
+    return calendar
 
 
 def install_signal_handlers(loop: asyncio.AbstractEventLoop, robot: PaperRobot) -> None:
@@ -335,6 +338,7 @@ async def run_start(args: argparse.Namespace) -> int:
         config_source=versioned.source,
         rules=_rules(config.symbols),
         calendar=load_calendar(args.calendar),
+        calendar_reload=CalendarReloader(args.calendar, DEFAULT_CALENDAR).reload,
         clock=SystemClock(),
         commands=CommandQueue(paths.commands),
         paths=paths,

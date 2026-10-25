@@ -175,7 +175,7 @@ def test_local_runs_in_clearly_local_mode_with_minimal_relaxation(
     assert "API_TRUST_FORWARDED_FOR" not in api
     relaxed = {k for k in api if k.startswith("API_") and k not in {
         "API_ENVIRONMENT", "API_COOKIE_SECURE", "API_PANEL_ORIGINS", "API_DATABASE_USER", "API_RUNNER_DATA_DIR",
-        "API_BACKTEST_CACHE_DIR", "API_BACKTEST_MAX_MEMORY_MB"}}  # fmt: skip
+        "API_BACKTEST_CACHE_DIR", "API_BACKTEST_MAX_MEMORY_MB", "API_CALENDAR_PATH"}}  # fmt: skip
     assert not relaxed
     assert not any("LIVE" in k or "SKIP_SCHEMA" in k for k in api)
     web = services["web"]["environment"]

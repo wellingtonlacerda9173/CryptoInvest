@@ -27,6 +27,7 @@ from api.services.backtests import BacktestRunner
 from api.services.commands import CommandPump
 from api.services.launcher import RunnerLauncher, SubprocessLauncher
 from api.services.realtime import RealtimeHub
+from api.services.ticker import BinanceTickerFetcher, TickerService
 from engine.infrastructure.config.logging import configure_logging
 from engine.infrastructure.config.redis_auth import with_redis_password
 from engine.infrastructure.config.settings import resolve_secrets_dir
@@ -124,6 +125,7 @@ def build_container(
         max_dropped=settings.ws_max_dropped_events,
     )
     container.backtests = BacktestRunner(container)
+    container.ticker = TickerService(BinanceTickerFetcher(settings.binance_api_origin), now)
     return container
 
 
@@ -212,6 +214,9 @@ def create_app(
             await asyncio.gather(*tasks, return_exceptions=True)
             if container.backtests is not None:
                 await container.backtests.shutdown()
+            if container.ticker is not None:
+                with contextlib.suppress(Exception):
+                    await container.ticker.close()
             if container.link is not None:
                 with contextlib.suppress(Exception):
                     await container.link.close()

@@ -12,6 +12,19 @@ const modeEnum = z.enum(['paper', 'live', 'backtest']);
 export const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const;
 export type Timeframe = (typeof TIMEFRAMES)[number];
 
+export const tickerSchema: Typed<'TickerOut'> = z.object({
+  quotes: z.array(
+    z.object({
+      symbol: str,
+      price: num,
+      change_24h_pct: num,
+      as_of: str,
+      age_seconds: num,
+      stale: z.boolean(),
+    }),
+  ),
+});
+
 export const candlesSchema: Typed<'CandlesOut'> = z.object({
   mode: modeEnum,
   simulated: z.boolean(),
@@ -33,7 +46,22 @@ export const candlesSchema: Typed<'CandlesOut'> = z.object({
   volume_24h: nnum,
   last_decision: nstr,
   blind_since: nstr.optional(),
+  decisions: z
+    .array(
+      z.object({
+        id: num,
+        t: str,
+        tier: z.enum(['entered', 'blocked', 'quiet']),
+        label: str,
+        text: str,
+        code: str,
+        strategy: nstr,
+      }),
+    )
+    .optional(),
+  decisions_truncated: z.boolean().default(false),
 });
+export type ChartDecision = Schemas['ChartDecisionOut'];
 export type Candles = Schemas['CandlesOut'];
 export type CandleBar = Schemas['CandleOut'];
 export type CandleMarker = Schemas['MarkerOut'];

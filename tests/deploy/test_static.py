@@ -119,7 +119,7 @@ def test_networks_isolate_database_and_redis(stack: dict[str, Any]) -> None:
     assert services["migrate"]["networks"] == ["backend"]
     assert set(services["web"]["networks"]) == {"frontend", "edge"}
     members = {n: {s for s, d in services.items() if n in d["networks"]} for n in networks}
-    assert members["egress"] == {"api", "runner"}
+    assert members["egress"] == {"api", "runner", "calendar-updater"}
     assert members["frontend"] == {"web"}
     assert members["edge"] == {"web", "api"}
     for name in ("timescaledb", "redis", "api", "runner", "migrate"):

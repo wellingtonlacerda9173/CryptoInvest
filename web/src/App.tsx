@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 // Telas com graficos ficam em pacotes separados: o login e o dashboard nao carregam Lightweight Charts.
 const MercadoPage = lazy(() => import('@/pages/MercadoPage'));
+const CalendarioPage = lazy(() => import('@/pages/CalendarioPage'));
 const DecisoesPage = lazy(() => import('@/pages/DecisoesPage'));
 const OperacoesPage = lazy(() => import('@/pages/OperacoesPage'));
 const DesempenhoPage = lazy(() => import('@/pages/DesempenhoPage'));
@@ -43,6 +44,7 @@ export function App({ socketFactory }: { socketFactory?: SocketFactory }) {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/controle" element={<ControlePage />} />
           <Route path="/mercado" element={lazyPage(<MercadoPage />)} />
+          <Route path="/calendario" element={lazyPage(<CalendarioPage />)} />
           <Route path="/decisoes" element={lazyPage(<DecisoesPage />)} />
           <Route path="/operacoes" element={lazyPage(<OperacoesPage />)} />
           <Route path="/desempenho" element={lazyPage(<DesempenhoPage />)} />

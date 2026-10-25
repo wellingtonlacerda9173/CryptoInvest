@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
+import { useCalendarAlert } from '@/api/calendarQueries';
 import { useBotStatus } from '@/api/queries';
 import { useAuth } from '@/auth/AuthContext';
 import { useConnection } from '@/realtime/ConnectionProvider';
@@ -12,6 +13,7 @@ import { useNavCollapsed } from './useNavCollapsed';
 
 export function AppLayout() {
   const { data } = useBotStatus();
+  const calendarAlert = useCalendarAlert();
   const { disconnected, lastMessageAt } = useConnection();
   const { logout } = useAuth();
   const navigate = useNavigate();
@@ -48,6 +50,7 @@ export function AppLayout() {
           collapsed={collapsed}
           onToggle={toggleCollapsed}
           alertCount={alertCount}
+          calendarAlert={calendarAlert}
           onLogout={handleLogout}
         />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -64,7 +67,7 @@ export function AppLayout() {
           </main>
         </div>
       </div>
-      <BottomNav alertCount={alertCount} onLogout={handleLogout} />
+      <BottomNav alertCount={alertCount} calendarAlert={calendarAlert} onLogout={handleLogout} />
     </StopAllBridge>
   );
 }

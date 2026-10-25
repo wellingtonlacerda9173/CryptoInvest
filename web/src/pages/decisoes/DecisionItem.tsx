@@ -1,5 +1,6 @@
 import { ArrowUp, ChevronDown, CircleDollarSign, Pause } from 'lucide-react';
 import { useId, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { readSignal } from '@/api/marketSchemas';
 import type { Decision } from '@/api/schemas';
 import { Chip, type ChipTone } from '@/components/kit/Chip';
@@ -65,6 +66,17 @@ export function DecisionItem({ decision: d }: { decision: Decision }) {
           />
         </span>
       </button>
+      {d.code === 'event_calendar_stale' ? (
+        <p className="px-1 pb-3 text-sec">
+          <Link
+            to="/calendario"
+            aria-label="Ver o calendário de eventos"
+            className="font-semibold underline underline-offset-2"
+          >
+            Ver calendário
+          </Link>
+        </p>
+      ) : null}
       <div id={panel} hidden={!open} className="px-1 pb-4">
         {open ? (
           <dl className="grid gap-x-4 gap-y-3 rounded-xl bg-surface-2 p-3.5 text-sec sm:grid-cols-[170px_1fr]">

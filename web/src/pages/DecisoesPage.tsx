@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { AlignLeft, Radio, WifiOff } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DECISION_FEED_MAX_PAGES, useDecisionFeed, useViewMode } from '@/api/marketQueries';
 import { KEYS, useSettings } from '@/api/queries';
 import type { Decision } from '@/api/schemas';
@@ -23,7 +24,10 @@ export default function DecisoesPage() {
   const { disconnected } = useConnection();
   const settings = useSettings();
   const [outcome, setOutcome] = useState<Outcome>('all');
-  const [symbol, setSymbol] = useState('');
+  const [params] = useSearchParams();
+  const [chosen, setSymbol] = useState(() => params.get('par') ?? '');
+  const symbols = settings.data?.document.pairs.symbols ?? [];
+  const symbol = symbols.includes(chosen) ? chosen : '';
   const filters = {
     ...(outcome === 'all' ? {} : { traded: outcome === 'traded' }),
     ...(symbol ? { symbol } : {}),
@@ -44,7 +48,6 @@ export default function DecisoesPage() {
     return all;
   }, [feed.data]);
   const summary = feed.data?.pages[0]?.summary;
-  const symbols = settings.data?.document.pairs.symbols ?? [];
   const filtered = outcome !== 'all' || symbol !== '';
   const frozen = disconnected;
 

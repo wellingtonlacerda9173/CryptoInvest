@@ -52,6 +52,14 @@ export const GLOSSARY = {
     term: 'Janela de evento',
     text: 'Período em torno de uma notícia importante (juros, inflação) em que o robô evita entrar.',
   },
+  calendario: {
+    term: 'Calendário',
+    text: 'Lista de datas em que o mercado costuma ter saltos bruscos. O robô só opera com ela em dia.',
+  },
+  'janela-bloqueio': {
+    term: 'Janela de bloqueio',
+    text: 'Período em torno de um evento em que o robô não abre operações novas.',
+  },
   'calendario-aberto': {
     term: 'Calendário aberto',
     text: 'O teste rodou sem o calendário de eventos. Funciona, mas esse teste nunca poderá liberar o Live.',

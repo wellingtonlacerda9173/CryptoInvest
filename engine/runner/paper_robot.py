@@ -120,6 +120,7 @@ EMERGENCY_LEG = "emg"
 # a foto de equity precede a fronteira do evento: trades no mesmo instante ainda contam como posteriores
 _PHOTO_LAG = timedelta(microseconds=1)
 LESSON_CACHE_SECONDS = 600
+CALENDAR_RELOAD_SECONDS = 3600
 _CAPITAL_TOLERANCE = Decimal("0.000001")
 _BACKOFF_RESET_SECONDS = 60.0
 PERSISTENCE_PAUSE = "persistencia indisponivel: "
@@ -219,6 +220,7 @@ class PaperRobot:
         lesson_source: LessonSource | None = None,
         lessons_job: Callable[[], Awaitable[object]] | None = None,
         lessons_interval_hours: int = 168,
+        calendar_reload: Callable[[EventCalendar, datetime], EventCalendar] | None = None,
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -232,6 +234,7 @@ class PaperRobot:
         self.strategies = tuple(strategies)
         self.rules = rules
         self.calendar = calendar
+        self._calendar_reload = calendar_reload
         self.clock = clock
         self.commands = commands
         self.signed_commands = signed_commands
@@ -546,6 +549,8 @@ class PaperRobot:
             if self._is_due("heartbeat", now, self.config.heartbeat_seconds):
                 await self._emit("heartbeat", self.status_payload(now))
                 self._write_status(now)
+        if self._calendar_reload is not None and self._is_due("calendar", now, CALENDAR_RELOAD_SECONDS):
+            self.calendar = self._calendar_reload(self.calendar, now)
         if self.config.selector.enabled and self._is_due(
             "scores", now, self.config.selector.recalc_hours * 3600
         ):

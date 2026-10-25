@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom';
+import { TriangleAlert } from 'lucide-react';
+import { useCalendar } from '@/api/calendarQueries';
 import type { BotStatus } from '@/api/schemas';
 import { formatClock } from '@/lib/format';
 import { Hero, type HeroTone } from './Hero';
@@ -86,18 +88,42 @@ export function heroFor(s: BotStatus, page: 'dashboard' | 'controle'): HeroCopy 
 }
 
 export function StateHero({ status, page }: { status: BotStatus; page: 'dashboard' | 'controle' }) {
-  const hero = heroFor(status, page);
+  const calendar = useCalendar().data;
+  const base = heroFor(status, page);
+  const hero: HeroCopy =
+    calendar?.state === 'expired' && base.tone === 'ok'
+      ? {
+          tone: 'warn',
+          title: 'O robô está ligado, mas não abre novas operações.',
+          text: 'O calendário de eventos está vencido. Posições abertas seguem protegidas por stop.',
+          action: { to: '/calendario', label: 'Ver calendário' },
+        }
+      : base;
+  const expiring = page === 'dashboard' && calendar?.state === 'expiring' && base.tone === 'ok';
   return (
-    <Hero headingId={`hero-${page}`} tone={hero.tone} title={hero.title}>
-      {hero.text}
-      {hero.action ? (
-        <>
-          {' '}
-          <Link to={hero.action.to} className="font-semibold underline underline-offset-2">
-            {hero.action.label}
-          </Link>
-        </>
+    <>
+      <Hero headingId={`hero-${page}`} tone={hero.tone} title={hero.title}>
+        {hero.text}
+        {hero.action ? (
+          <>
+            {' '}
+            <Link to={hero.action.to} className="font-semibold underline underline-offset-2">
+              {hero.action.label}
+            </Link>
+          </>
+        ) : null}
+      </Hero>
+      {expiring ? (
+        <p className="flex items-center gap-2 rounded-xl border border-warn bg-warn-bg px-3.5 py-2.5 text-sec">
+          <TriangleAlert className="size-4 shrink-0 text-warn" aria-hidden="true" />
+          <span>
+            O calendário de eventos vence em breve.{' '}
+            <Link to="/calendario" className="font-semibold underline underline-offset-2">
+              Ver calendário
+            </Link>
+          </span>
+        </p>
       ) : null}
-    </Hero>
+    </>
   );
 }

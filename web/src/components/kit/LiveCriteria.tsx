@@ -1,4 +1,6 @@
-import { CircleCheck, CircleX, Clock, type LucideIcon } from 'lucide-react';
+import { CircleCheck, CircleX, Clock, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useCalendar } from '@/api/calendarQueries';
 import type { LiveGate } from '@/api/schemas';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +14,43 @@ const STATUS: Record<
 };
 
 /** Valor atual x meta, com palavra e icone para cada criterio (cumprido, reprovado, em andamento). */
+function CalendarRow() {
+  const state = useCalendar().data?.state;
+  if (!state) return null;
+  const view = {
+    ok: { Icon: CircleCheck, icon: 'text-gain', word: 'Em dia', note: null },
+    expiring: {
+      Icon: TriangleAlert,
+      icon: 'text-warn',
+      word: 'Atenção',
+      note: 'O calendário vence em breve.',
+    },
+    expired: {
+      Icon: CircleX,
+      icon: 'text-loss',
+      word: 'Vencido',
+      note: 'Calendário vencido: o robô não opera até ele ser atualizado.',
+    },
+  }[state];
+  return (
+    <li className="flex flex-wrap items-start gap-x-2.5 gap-y-1">
+      <view.Icon className={cn('mt-0.5 size-5 shrink-0', view.icon)} aria-hidden="true" />
+      <span className="min-w-0 flex-1 basis-[11rem]">
+        Calendário de eventos em dia
+        <span className="sr-only">: {view.word}.</span>
+        {view.note ? <span className="block text-cap text-muted">{view.note}</span> : null}
+      </span>
+      <Link
+        to="/calendario"
+        aria-label="Ver o calendário de eventos"
+        className="font-semibold underline underline-offset-2 max-sm:basis-full max-sm:pl-[30px] sm:ml-auto"
+      >
+        Ver calendário
+      </Link>
+    </li>
+  );
+}
+
 export function LiveCriteria({ criteria }: { criteria: LiveGate['criteria'] }) {
   return (
     <ul aria-label="Critérios para liberar o Live" className="flex flex-col gap-2.5">
@@ -39,6 +78,7 @@ export function LiveCriteria({ criteria }: { criteria: LiveGate['criteria'] }) {
           </li>
         );
       })}
+      <CalendarRow />
     </ul>
   );
 }

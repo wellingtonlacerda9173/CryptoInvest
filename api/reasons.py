@@ -117,7 +117,7 @@ REASONS: Final[dict[str, Reason]] = {
         "Não entrou", "Os dados do sinal não bateram entre si; por segurança o robô não entrou.", "refused"
     ),
     RejectionCode.EVENT_CALENDAR_STALE.value: Reason(
-        "Não entrou", "Sem um calendário de eventos válido e atualizado.", "refused"
+        "Não entrou", "O calendário de eventos está vencido.", "refused"
     ),
     RejectionCode.ENTRY_PENDING.value: Reason(
         "Não entrou", "Já existe uma ordem de compra esperando execução neste par.", "refused"

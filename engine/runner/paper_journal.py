@@ -23,7 +23,13 @@ from engine.domain.trade import Trade
 from engine.infrastructure.persistence.models import ControlEventRow, DecisionRow, RunRow
 from engine.infrastructure.persistence.position_repository import PositionRepository
 from engine.infrastructure.persistence.recovery import RecoveryState, load_recovery_state
-from engine.infrastructure.persistence.run_repository import EquityConflictError
+from engine.infrastructure.persistence.run_config_change import (
+    CHANGE_ACTION,
+    change_audit,
+    current_hash,
+    versioned_change_allowed,
+)
+from engine.infrastructure.persistence.run_repository import EquityConflictError, RunRepository
 from engine.infrastructure.persistence.serialization import ConflictError
 from engine.infrastructure.persistence.unit_of_work import UnitOfWork
 
@@ -114,8 +120,17 @@ class SqlJournal:
         return await load_recovery_state(self._sessions, self.run_id)
 
     async def start_run(self, run: RunRecord, config: Mapping[str, Any], event: ControlEvent) -> None:
+        stored = await self._stored_run()
+        accepted: str | None = None
+        changed = False
+        if stored is not None and stored.mode == run.mode:
+            baseline = await current_hash(self._sessions, stored)
+            if run.config_hash == baseline:
+                accepted = baseline
+            elif await versioned_change_allowed(self._sessions, stored, config):
+                accepted, changed = run.config_hash, True
         async with UnitOfWork(self._sessions) as uow:
-            await uow.runs.start(run)
+            await uow.runs.start(run, accepted_hash=accepted)
             await uow.control_events.append(self.run_id, event)
             await uow.audit(
                 event.operator,
@@ -123,6 +138,12 @@ class SqlJournal:
                 self.run_id,
                 {"config": dict(config), "code_version": run.code_version, "reason": event.reason},
             )
+            if changed and stored is not None:
+                await uow.audit(event.operator, CHANGE_ACTION, self.run_id, change_audit(stored, run, config))
+
+    async def _stored_run(self) -> RunRecord | None:
+        async with self._sessions() as session:
+            return await RunRepository(session).get(self.run_id)
 
     async def record_decision(
         self,

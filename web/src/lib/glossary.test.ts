@@ -3,9 +3,9 @@ import { BOT_STATES, DISCONNECTED_FACE, describeBotState } from './bot-state';
 import { GLOSSARY } from './glossary';
 
 describe('glossario', () => {
-  it('tem os 15 termos do design system mais 4 das telas de mercado e 7 de backtest e configurações, todos com explicacao', () => {
+  it('tem os 15 termos do design system mais 4 das telas de mercado, 7 de backtest e configurações e 2 do calendário, todos com explicacao', () => {
     const entries = Object.values(GLOSSARY);
-    expect(entries).toHaveLength(26);
+    expect(entries).toHaveLength(28);
     for (const e of entries) {
       expect(e.term.length).toBeGreaterThan(0);
       expect(e.text.length).toBeGreaterThan(20);

@@ -18,6 +18,8 @@ from api.schemas_trading import (
     PerformanceOut,
     PositionOut,
     RiskLimitOut,
+    TickerOut,
+    TickerQuoteOut,
     TradePage,
 )
 from api.services.livegate import LiveGateService, gate_out
@@ -237,8 +239,30 @@ async def list_candles(
     symbol: Annotated[str, Query(pattern=r"^[A-Z0-9]{2,12}/[A-Z0-9]{2,12}$", examples=["BTC/USDT"])],
     timeframe: Timeframe = Timeframe.H1,
     limit: Annotated[int, Query(ge=10, le=1000)] = 300,
+    quiet: bool = False,
 ) -> CandlesOut:
-    return await TradingReads(container).candles(symbol=symbol, timeframe=timeframe, limit=limit)
+    return await TradingReads(container).candles(symbol=symbol, timeframe=timeframe, limit=limit, quiet=quiet)
+
+
+_PAIR = r"[A-Z0-9]{2,12}/[A-Z0-9]{2,12}"
+
+
+@router.get(
+    "/market/ticker",
+    operation_id="getTicker",
+    response_model=TickerOut,
+    summary="Cotacao ao vivo (so visual) com cache curto; se a corretora falhar, a lista vem vazia",
+)
+async def get_ticker(
+    _: UserDep,
+    container: ContainerDep,
+    symbols: Annotated[str, Query(pattern=rf"^{_PAIR}(,{_PAIR}){{0,7}}$", examples=["BTC/USDT,ETH/USDT"])],
+) -> TickerOut:
+    if container.ticker is None:
+        return TickerOut(quotes=[])
+    allowed = await TradingReads(container).ticker_symbols()
+    quotes = await container.ticker.quotes(symbols.split(","), allowed=allowed)
+    return TickerOut(quotes=[TickerQuoteOut.model_validate(q, from_attributes=True) for q in quotes])
 
 
 @router.get(

@@ -1,6 +1,7 @@
 import {
   AlignLeft,
   ArrowLeftRight,
+  CalendarClock,
   ChartCandlestick,
   ChartLine,
   Clock,
@@ -10,6 +11,14 @@ import {
   UserRound,
   type LucideIcon,
 } from 'lucide-react';
+import type { CalendarAlert } from '@/api/calendarQueries';
+
+export type { CalendarAlert };
+
+export const CALENDAR_ALERT_TEXT = {
+  expiring: 'Calendário: atenção',
+  expired: 'Calendário: vencido',
+} as const;
 
 export interface NavItem {
   to: string;
@@ -22,6 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', short: 'Início', icon: LayoutDashboard },
   { to: '/controle', label: 'Controle', icon: SlidersHorizontal },
   { to: '/mercado', label: 'Mercado', icon: ChartCandlestick },
+  { to: '/calendario', label: 'Calendário', icon: CalendarClock },
   { to: '/decisoes', label: 'Decisões ao vivo', icon: AlignLeft },
   { to: '/operacoes', label: 'Operações', icon: ArrowLeftRight },
   { to: '/desempenho', label: 'Desempenho', icon: ChartLine },
@@ -37,6 +47,7 @@ export const BOTTOM_ITEMS: NavItem[] = ['/dashboard', '/controle', '/operacoes',
 );
 export const MORE_ITEMS: NavItem[] = [
   '/mercado',
+  '/calendario',
   '/decisoes',
   '/backtest',
   '/configuracoes',
