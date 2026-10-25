@@ -51,9 +51,18 @@ from engine.infrastructure.live.errors import (
     ProtectionError,
     ProtectiveOrderCancelError,
     TradingHaltedError,
+    UnattributedSalesError,
 )
 from engine.infrastructure.live.fills import FillKind, FillLog, LiveFill
 from engine.infrastructure.live.filters import FilterCache, SymbolFilters
+from engine.infrastructure.live.recovery import (
+    OperatorConfirmation,
+    OrphanCloseResult,
+    PersistedEntry,
+    RecoveredEntry,
+    RecoveryOutcome,
+    RecoveryResult,
+)
 
 log = structlog.get_logger()
 
@@ -76,6 +85,8 @@ _STATUS = {
     "EXPIRED": OrderStatus.EXPIRED,
     "EXPIRED_IN_MATCH": OrderStatus.EXPIRED,
 }
+_GENERATION_LOOKAHEAD = 2
+_MAX_EMERGENCY_PROBES = 200
 _DONE = frozenset({"FILLED", "CANCELED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"})
 
 Alert = Callable[[str, str], None]
@@ -138,6 +149,13 @@ class _Entry:
     exposed_since: float | None = None
     exposure_alerted: bool = False
     poll_failures: int = 0
+    post_attempt_at: float | None = None
+    submitted: bool = False
+    buy_open: bool = False
+    unknown_since: float | None = None
+    emergency_alerted_at: float | None = None
+    rebuilt: bool = True
+    recover: PersistedEntry | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     closed_reason: str = ""
 
@@ -198,6 +216,7 @@ class LiveGateway:
         sleep: Callable[[float], Any] = asyncio.sleep,
         on_alert: Alert | None = None,
         on_fill: Callable[[LiveFill], None] | None = None,
+        on_audit: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._config = config
         self._client = client
@@ -207,6 +226,7 @@ class LiveGateway:
         self._mono = monotonic
         self._sleep = sleep
         self._alert_cb = on_alert
+        self._audit_cb = on_audit
         self._fills = FillLog(
             on_fill,
             lambda n: self._alert("warning", f"sink de fills falhou; {n} fill(s) pendentes na outbox"),
@@ -407,16 +427,25 @@ class LiveGateway:
             async with entry.lock, self._watch(entry):
                 free_quote = await self._free_quote()
                 if cost > free_quote:
-                    self._entries.pop(cid, None)
                     raise InsufficientBalanceError(f"custo {cost} acima do saldo livre {free_quote}")
                 await self._submit_entry(entry, filters)
                 self._submitted.append(order)
                 await self._advance(entry)
-        except LiveError:
-            if entry.state == "working" and cid in self._entries and not await self._entry_exists(entry):
-                self._entries.pop(cid, None)
+        except BaseException as error:
+            await self._discard_unsent_entry(entry, error)
             raise
         return await self._entry_report(entry)
+
+    async def _discard_unsent_entry(self, entry: _Entry, error: BaseException) -> None:
+        """Libera reserva de capital e client id quando NENHUMA ordem pode ter chegado a corretora. POST ja
+        disparado e sem confirmacao: so descarta se um GET confirmar ausencia; senao a entrada fica `working`
+        e `_advance_working` a encerra por TTL (`_expire_unsent`)."""
+        if entry.submitted or self._entries.get(entry.entry_id) is not entry:
+            return
+        if entry.post_attempt_at is None or (
+            isinstance(error, LiveError) and not await self._entry_exists(entry)
+        ):
+            self._entries.pop(entry.entry_id, None)
 
     def _check_entry_filters(self, filters: SymbolFilters, order: EntryOrder) -> None:
         missing = [t for t in ("LIMIT", "LIMIT_MAKER", "STOP_LOSS") if t not in filters.order_types]
@@ -472,8 +501,12 @@ class LiveGateway:
         }
         params |= self._stop_params("pendingBelow", o.stop_loss, filters)
         await self._post_idempotent(
-            "/api/v3/orderList/opoco", params, lookup=lambda: self._get_list(o.symbol, ids["list"])
+            "/api/v3/orderList/opoco",
+            params,
+            lookup=lambda: self._get_list(o.symbol, ids["list"]),
+            on_attempt=lambda: setattr(entry, "post_attempt_at", self._mono()),
         )
+        entry.submitted = True
 
     @staticmethod
     def _ids(entry_id: str, generation: int) -> dict[str, str]:
@@ -500,9 +533,12 @@ class LiveGateway:
         *,
         lookup: Callable[[], Any],
         critical: bool = False,
+        on_attempt: Callable[[], None] | None = None,
     ) -> Any:
         """POST de ordem. Apos timeout/5xx consulta por id ANTES de reenviar; nunca duplica."""
         for _ in range(self._config.order_lookup_retries):
+            if on_attempt is not None:
+                on_attempt()
             try:
                 return await self._client.request("POST", path, params, signed=True, critical=critical)
             except BinanceApiError as error:
@@ -696,6 +732,10 @@ class LiveGateway:
             await self._advance_protected(entry)
 
     async def _advance_exposed(self, entry: _Entry) -> None:
+        if not entry.rebuilt:
+            await self._rebuild(entry)
+            if entry.state != "exposed":
+                return
         await self._reprotect(entry, reason="retomada segura")
 
     # ---- ledger -----------------------------------------------------------------------------------
@@ -717,6 +757,12 @@ class LiveGateway:
     def _owed(self, entry: _Entry) -> Decimal:
         """Quantidade que ESTA entrada ainda detem na corretora: comprado liquido - vendido (nunca < 0)."""
         return max(_ZERO, entry.bought_gross - self._fee_in_base(entry) - self._sold(entry))
+
+    async def _fresh_owed(self, entry: _Entry) -> Decimal:
+        """UNICO ponto que entrega `owed` para vender/proteger: confere antes na corretora (`_sync_ledger`).
+        Falha na leitura propaga (fail-closed): sem ledger recente nenhuma venda e calculada."""
+        await self._sync_ledger(entry)
+        return self._owed(entry)
 
     @staticmethod
     def _record_sale(entry: _Entry, cid: str, executed: Decimal) -> None:
@@ -796,13 +842,13 @@ class LiveGateway:
         try:
             async with asyncio.timeout(self._budget_left(entry)):
                 filters = await self._filters_or_stale(entry.symbol)
-                await self._sync_ledger(entry)
+                owed = await self._fresh_owed(entry)
                 if await self._adopt_live_protection(entry):
                     return await self._protection_report(entry)
                 free = await self._free_base(entry.symbol)
         except TimeoutError:
             return await self._deadline_exit(entry, reason)
-        quantity = filters.round_quantity_down(min(self._owed(entry), free))
+        quantity = filters.round_quantity_down(min(owed, free))
         if self._sold(entry) > 0 and quantity < filters.min_qty:
             return await self._close_flat(entry, "posicao encerrada pela protecao")
         if entry.want_stop is None:
@@ -819,6 +865,10 @@ class LiveGateway:
         return await self._emergency_exit(entry, f"{reason}; orcamento de tempo da protecao esgotado")
 
     async def _close_flat(self, entry: _Entry, reason: str) -> OrderReport:
+        entry.emergency_alerted_at = None
+        if entry.buy_open:
+            entry.state, entry.protection = "working", None
+            return await self._protection_report(entry)
         entry.state, entry.closed_reason, entry.protection = "closed", reason, None
         return await self._protection_report(entry)
 
@@ -854,7 +904,9 @@ class LiveGateway:
     async def _advance_working(self, entry: _Entry, *, after_cancel: bool = False) -> None:
         raw = await self._get_order(entry.symbol, entry.entry_id)
         if raw is None:
+            await self._expire_unsent(entry)
             return
+        entry.submitted = True
         executed = Decimal(raw["executedQty"])
         status = str(raw["status"])
         if executed > 0:
@@ -874,6 +926,22 @@ class LiveGateway:
             entry.partial_since = entry.partial_since or self._mono()
             if after_cancel or self._mono() - entry.partial_since >= self._config.partial_fill_grace_seconds:
                 await self._truncate_partial(entry)
+
+    async def _expire_unsent(self, entry: _Entry) -> None:
+        """GET confirmou que a compra NAO existe. Se o POST nunca foi confirmado, so descarta a entrada apos a
+        aprovacao vencer ou a janela em que a corretora ainda aceitaria o POST (recvWindow + margem, contada
+        da ULTIMA tentativa): um POST em voo nao pode mais vingar. Leitura que falha (desconhecido) nunca
+        chega aqui: a entrada segue `working` ate a ausencia ser confirmada."""
+        if entry.submitted:
+            return
+        window = self._config.recv_window_ms / 1000 + self._config.unsent_entry_margin_seconds
+        sent_at = entry.post_attempt_at if entry.post_attempt_at is not None else entry.placed_at
+        if self._mono() - sent_at < window and not self._approval_lapsed(entry):
+            return
+        with contextlib.suppress(LiveError):
+            await self._cancel_list(entry.symbol, derived_id(entry.entry_id, "L0"), critical=False)
+        self._alert("warning", f"{entry.entry_id}: entrada nunca chegou a corretora; descartada")
+        self._entries.pop(entry.entry_id, None)
 
     def _approval_lapsed(self, entry: _Entry) -> bool:
         return entry.expires_at is not None and self._now() >= entry.expires_at
@@ -918,16 +986,22 @@ class LiveGateway:
     async def _truncate_partial(self, entry: _Entry) -> None:
         """Fill parcial nao ativa as pernas OPOCO: cancela o resto (CONFIRMADO por GET) e protege o executado.
 
-        Sem confirmacao a compra GTC pode seguir viva: a entrada NAO avanca, o gateway pausa e alerta; o
-        proximo ciclo repete o cancel e um fill posterior e protegido normalmente."""
+        Sem confirmacao a compra GTC pode seguir viva: o executado recebe IMEDIATAMENTE um stop avulso (OCO),
+        a entrada fica `protected` com `buy_open`, o gateway pausa e alerta; cada ciclo repete o cancel e
+        cobre o delta de um fill posterior (`_settle_open_buy`)."""
         self._ensure_writable()
         refreshed = await self._cancel_buy(entry)
         if refreshed is None:
             self._halt(
                 f"{entry.entry_id}: compra parcial com cancelamento NAO confirmado (ordem pode seguir viva); "
-                "fill posterior ficara sem stop ate o proximo ciclo"
+                "executado protegido por stop avulso, fill posterior sera coberto no proximo ciclo"
             )
+            entry.buy_open = True
+            self._expose(entry, entry.order.stop_loss, entry.order.take_profit)
+            self._alert_exposure(entry, "compra parcial com cancelamento nao confirmado")
+            await self._reprotect(entry, reason="fill parcial com cancelamento nao confirmado")
             raise ProtectionError(f"{entry.entry_id}: cancelamento da compra parcial nao confirmado")
+        entry.buy_open = False
         executed = Decimal(refreshed["executedQty"])
         if executed > 0:
             await self._collect_fills(entry, refreshed, FillKind.ENTRY)
@@ -939,14 +1013,15 @@ class LiveGateway:
         stop_leg = await self._get_order(entry.symbol, ids["below"])
         status = str(stop_leg["status"]) if stop_leg else "MISSING"
         if status == "NEW":
-            o = entry.order
-            quantity = Decimal(stop_leg["origQty"]) if stop_leg else o.quantity
-            entry.protection = _Protection(quantity, o.stop_loss, o.take_profit, 0)
-            entry.state = "protected"
+            self._adopt_opoco_legs(entry, stop_leg)
             return
         sold_before = self._sold(entry)
         await self._sync_ledger(entry)
         if self._sold(entry) > sold_before:
+            filters = await self._filters_or_stale(entry.symbol)
+            if self._is_flat(entry, filters):
+                await self._close_flat(entry, "alvo/stop executou antes do primeiro ciclo")
+                return
             self._expose(entry, entry.order.stop_loss, entry.order.take_profit)
             self._alert_exposure(entry, "stop/alvo executou antes do primeiro ciclo")
             await self._reprotect(entry, reason="protecao encerrada antes do primeiro ciclo")
@@ -1036,7 +1111,7 @@ class LiveGateway:
                     return await self._emergency_exit(entry, f"{reason}; stop dispararia na hora")
                 if error.code == _REJECTED:
                     free = await self._free_base(entry.symbol)
-                    quantity = filters.round_quantity_down(min(quantity, free, self._owed(entry)))
+                    quantity = filters.round_quantity_down(min(quantity, free, await self._fresh_owed(entry)))
                     if quantity < filters.min_qty:
                         return await self._close_flat(entry, "sem saldo para proteger")
             else:
@@ -1046,7 +1121,7 @@ class LiveGateway:
             log.error("live_protection_failed", entry=entry.entry_id, error=type(last_error).__name__)
             return await self._emergency_exit(entry, f"{reason}; protecao falhou apos retries")
         entry.protection = _Protection(quantity, stop, target, generation)
-        entry.state = "protected"
+        entry.state, entry.emergency_alerted_at = "protected", None
         return await self._protection_report(entry)
 
     async def _post_oco(
@@ -1118,8 +1193,11 @@ class LiveGateway:
 
         Confere executedQty; sobra => repete (backoff, orcamento de falhas). Esgotado, ou IP banido: a posicao
         segue `exposed`, o gateway PAUSA + alerta critico e a retomada segura (poll) tenta de novo.
+        CONSERVADOR: ledger persistentemente ilegivel IMPEDE a venda (nao ha como saber o que e da entrada e
+        o que e saldo alheio): a posicao fica exposta, pausada e alertada ate a leitura voltar ou o operador
+        agir (`close_orphan`).
         """
-        self._alert("critical", f"{entry.entry_id}: venda de emergencia ({reason})")
+        self._alert_emergency(entry, reason)
         entry.state, entry.protection = "exposed", None
         last: Exception | None = None
         failures = 0
@@ -1129,13 +1207,12 @@ class LiveGateway:
                 break
             try:
                 filters = await self._filters_or_stale(entry.symbol)
+                remaining = await self._fresh_owed(entry)
                 if not checked:
                     # Um POST de protecao cancelado/sem resposta pode ter vingado: adotar em vez de vender.
-                    await self._sync_ledger(entry)
                     if await self._adopt_live_protection(entry):
                         return await self._protection_report(entry)
                     checked = True
-                remaining = self._owed(entry)
                 if remaining < filters.market_min:
                     return await self._close_after_emergency(entry, reason, remaining)
                 free = await self._free_base(entry.symbol)
@@ -1174,6 +1251,14 @@ class LiveGateway:
             f"({type(last).__name__ if last else 'sobra'}); retomada segura pendente"
         )
         raise ProtectionError(f"{entry.entry_id}: emergencia falhou; gateway pausado")
+
+    def _alert_emergency(self, entry: _Entry, reason: str) -> None:
+        """Debounce: 1 alerta critico por episodio; reescalona a cada `emergency_realert_seconds`."""
+        now = self._mono()
+        last = entry.emergency_alerted_at
+        if last is None or now - last >= self._config.emergency_realert_seconds:
+            entry.emergency_alerted_at = now
+            self._alert("critical", f"{entry.entry_id}: venda de emergencia ({reason})")
 
     async def _close_after_emergency(self, entry: _Entry, reason: str, dust: Decimal) -> OrderReport:
         if dust > 0:
@@ -1215,7 +1300,32 @@ class LiveGateway:
                 log.warning("live_fill_collect_failed", entry=entry.entry_id, error=type(error).__name__)
         return executed
 
+    async def _settle_open_buy(self, entry: _Entry) -> None:
+        """Compra parcial com cancelamento antes nao confirmado: repete o cancel, contabiliza o executado e
+        cobre o delta (fill posterior) com nova protecao sobre o `owed` total."""
+        raw = await self._get_order(entry.symbol, entry.entry_id)
+        if raw is None:
+            return
+        if str(raw["status"]) not in _DONE:
+            raw = await self._cancel_buy(entry) or raw
+        if (executed := Decimal(raw["executedQty"])) > entry.bought_gross:
+            await self._collect_fills(entry, raw, FillKind.ENTRY)
+            entry.bought_gross = executed
+        if str(raw["status"]) in _DONE:
+            entry.buy_open = False
+        prot = entry.protection
+        if entry.state != "protected" or prot is None:
+            return
+        filters = await self._filters_or_stale(entry.symbol)
+        total = filters.round_quantity_down(await self._fresh_owed(entry))
+        if total - prot.quantity >= filters.min_qty and total * prot.stop >= filters.min_notional:
+            await self._replace(entry, prot, prot.stop, prot.target, filters)
+
     async def _advance_protected(self, entry: _Entry) -> None:
+        if entry.buy_open:
+            await self._settle_open_buy(entry)
+            if entry.state != "protected":
+                return
         prot = entry.protection
         if prot is None:
             self._expose(entry, entry.want_stop or entry.order.stop_loss, entry.want_target)
@@ -1232,12 +1342,34 @@ class LiveGateway:
             missing = leg is None
         if not (done or missing):
             return
-        self._expose(entry, prot.stop, prot.target)
         sold_before = self._sold(entry)
-        await self._sync_ledger(entry)
+        try:
+            filters = await self._filters_or_stale(entry.symbol)
+            await self._sync_ledger(entry)
+        except LiveError:
+            self._ledger_unknown_after_protection_end(entry, prot)
+            raise
+        entry.unknown_since = None
+        if self._is_flat(entry, filters):
+            await self._close_flat(entry, "posicao encerrada pela protecao")
+            return
+        self._expose(entry, prot.stop, prot.target)
         if self._sold(entry) == sold_before:
             self._alert_exposure(entry, "protecao removida/expirada fora do robo")
         await self._reprotect(entry, reason="protecao encerrada sem venda total")
+
+    def _ledger_unknown_after_protection_end(self, entry: _Entry, prot: _Protection) -> None:
+        """A protecao terminou mas o ledger nao pode ser lido: estado DESCONHECIDO, reprocessado no proximo
+        ciclo sem pausa nem alerta critico (pode ser so a venda no alvo). Persistindo alem do orcamento de
+        tempo da protecao, a posicao e tratada como exposta (o ciclo pausa e a retomada segura age)."""
+        now = self._mono()
+        entry.unknown_since = entry.unknown_since if entry.unknown_since is not None else now
+        if now - entry.unknown_since >= self._config.protection_deadline_seconds:
+            self._expose(entry, prot.stop, prot.target)
+            self._alert_exposure(entry, "protecao encerrada e ledger ilegivel alem do prazo")
+
+    def _is_flat(self, entry: _Entry, filters: SymbolFilters) -> bool:
+        return self._sold(entry) > 0 and filters.round_quantity_down(self._owed(entry)) < filters.min_qty
 
     # ---- raise_stop / drop_target -----------------------------------------------------------------
 
@@ -1283,6 +1415,7 @@ class LiveGateway:
         self, entry: _Entry, prot: _Protection, stop: Decimal, target: Decimal | None, filters: SymbolFilters
     ) -> OrderReport:
         self._expose(entry, prot.stop, prot.target)
+        # Dentro da janela nao ha leitura extra: o DELETE devolve o executado das pernas (`_record_reports`).
         legs_sold = await self._cancel_protection(entry, prot)
         quantity = filters.round_quantity_down(self._owed(entry))
         if quantity < filters.min_qty:
@@ -1387,27 +1520,51 @@ class LiveGateway:
         async with contextlib.AsyncExitStack() as stack:
             for held in open_entries:
                 await stack.enter_async_context(held.lock)
-            for held in open_entries:
-                if held.state not in ("protected", "closed"):
-                    await self._refresh_bought(held)
-            candidates = sorted(
-                (e for e in open_entries if e.state != "closed"), key=lambda e: e.state != "protected"
-            )
-            entry = next((e for e in candidates if order.quantity <= self._owed(e)), None)
+            candidates = sorted(open_entries, key=lambda e: e.state != "protected")
+            entry = None
+            for held in candidates:
+                if held.state != "protected":
+                    await self._settle_filled_buy(held)
+                if held.state != "closed" and order.quantity <= await self._fresh_owed(held):
+                    entry = held
+                    break
             if entry is None:
                 raise FilterViolationError("saida maior que a posicao das entradas abertas")
             async with self._watch(entry):
                 if entry.state == "protected":
                     await self._exit_protected(entry, order, params, filters)
                 else:
-                    await self._exit_unprotected(entry, order, params)
+                    await self._exit_unprotected(entry, order, params, filters)
         return await self._exit_report(order)
 
-    async def _refresh_bought(self, entry: _Entry) -> None:
+    async def _settle_filled_buy(self, entry: _Entry) -> None:
+        """Poe a entrada em dia ANTES de calcular o owed de uma saida: contabiliza o fill e, se a compra ja
+        encheu, uma OCO viva so na corretora vira `protected` (a saida passa pelo caminho com cancel, sem a
+        corrida alvo/stop x venda); pernas ainda `PENDING_NEW` sao canceladas antes de vender."""
+        if entry.state != "working":
+            return
         raw = await self._get_order(entry.symbol, entry.entry_id, critical=True)
-        if raw is not None and (executed := Decimal(raw["executedQty"])) > 0:
+        if raw is None:
+            return
+        if (executed := Decimal(raw["executedQty"])) > 0:
             await self._collect_fills(entry, raw, FillKind.ENTRY)
             entry.bought_gross = max(entry.bought_gross, executed)
+        if str(raw["status"]) != "FILLED":
+            return
+        entry.filled_at = entry.filled_at or self._mono()
+        leg = await self._get_order(entry.symbol, self._ids(entry.entry_id, 0)["below"], critical=True)
+        match str(leg["status"]) if leg else "MISSING":
+            case "NEW":
+                self._adopt_opoco_legs(entry, leg)
+            case "PENDING_NEW":
+                with contextlib.suppress(BinanceApiError):
+                    await self._cancel_list(entry.symbol, derived_id(entry.entry_id, "L0"), critical=True)
+
+    def _adopt_opoco_legs(self, entry: _Entry, stop_leg: dict[str, Any] | None) -> None:
+        o = entry.order
+        quantity = Decimal(stop_leg["origQty"]) if stop_leg else o.quantity
+        entry.protection = _Protection(quantity, o.stop_loss, o.take_profit, 0)
+        entry.state = "protected"
 
     async def _post_exit(
         self, entry: _Entry, order: ExitOrder, params: dict[str, str]
@@ -1443,7 +1600,20 @@ class LiveGateway:
             entry.final.add(cid)
         return True, error
 
-    async def _exit_unprotected(self, entry: _Entry, order: ExitOrder, params: dict[str, str]) -> None:
+    async def _clamp_exit(
+        self, entry: _Entry, order: ExitOrder, params: dict[str, str], filters: SymbolFilters
+    ) -> dict[str, str]:
+        """Quantidade da saida = min(pedido, owed recente, saldo livre); abaixo do lote minimo, recusa."""
+        free = await self._free_base(entry.symbol)
+        quantity = filters.round_quantity_down(min(order.quantity, self._owed(entry), free))
+        if quantity < filters.min_qty:
+            raise FilterViolationError("saldo livre/posicao da entrada abaixo do lote minimo de saida")
+        return params | {"quantity": _fmt(quantity)}
+
+    async def _exit_unprotected(
+        self, entry: _Entry, order: ExitOrder, params: dict[str, str], filters: SymbolFilters
+    ) -> None:
+        params = await self._clamp_exit(entry, order, params, filters)
         _, error = await self._post_exit(entry, order, params)
         if error is not None:
             raise error
@@ -1458,6 +1628,9 @@ class LiveGateway:
         if self._sold(entry) > sold_before:
             await self._reprotect(entry, reason="protecao encerrada durante a saida")
             raise ProtectionError("protecao encerrada durante a saida; reconsulte a posicao")
+        # `owed` acabou de ser conferido (cancel + sync): ja limita a venda ao que a entrada detem.
+        with contextlib.suppress(LiveError):
+            params = await self._clamp_exit(entry, order, params, filters)
         known, error = await self._post_exit(entry, order, params)
         if not known:
             self._halt(
@@ -1598,6 +1771,334 @@ class LiveGateway:
         if entry.state != "protected" or entry.protection is None:
             raise UnknownOrderError(entry.entry_id)
         return entry.protection
+
+    # ---- recuperacao apos reinicio ----------------------------------------------------------------
+
+    async def recover(self, entries: Sequence[PersistedEntry]) -> RecoveryResult:
+        """Reconstroi, SEM estado extra, entradas de uma instancia anterior a partir dos ids deterministicos.
+
+        Fase 1 (so leitura, todas as entradas): compra (L0), geracoes S/T/X, emergencias EM e saidas
+        persistidas -> `bought_gross` e `sold` via ordem + `/myTrades` por orderId. Fase 2: vendas na conta
+        que nenhuma entrada reconstruida explica (saida sem id persistido, venda manual) => entradas do
+        simbolo ficam `exposed` com PAUSA + alerta, sem vender nem proteger com ledger duvidoso. Fase 3: ADOTA
+        a protecao viva (reprotegendo o delta) ou reprotege. O que nao puder ser reconstruido fica `exposed`
+        (pausa + alerta critico) e e retomado no proximo `poll`. Fills ja entregues numa execucao anterior
+        sao reemitidos para `on_fill` (o sink deve ser idempotente por (simbolo, trade_id)).
+        """
+        self._ensure_writable()
+        results: dict[str, RecoveredEntry] = {}
+        fresh: list[_Entry] = []
+        async with contextlib.AsyncExitStack() as stack:
+            for persisted in entries:
+                cid = persisted.order.client_order_id
+                if cid in self._entries:
+                    results.setdefault(
+                        cid, RecoveredEntry(cid, "already_known", "entrada ja registrada neste gateway")
+                    )
+                    continue
+                self._filters.check_allowed(persisted.order.symbol)
+                entry = self._register_recovering(persisted)
+                await stack.enter_async_context(entry.lock)
+                await stack.enter_async_context(self._watch(entry))
+                fresh.append(entry)
+            reads = await self._recover_reads(fresh, results)
+            for entry in fresh:
+                if entry.entry_id in results:
+                    continue
+                try:
+                    outcome, detail = await self._apply_rebuilt(entry, reads[entry.entry_id])
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    results[entry.entry_id] = self._recovery_failed(entry, error)
+                else:
+                    results[entry.entry_id] = RecoveredEntry(entry.entry_id, outcome, detail)
+        return RecoveryResult(tuple(results[p.order.client_order_id] for p in entries))
+
+    def _register_recovering(self, persisted: PersistedEntry) -> _Entry:
+        order = persisted.order
+        entry = _Entry(
+            order=order,
+            expires_at=persisted.expires_at,
+            placed_at=self._mono(),
+            rebuilt=False,
+            recover=persisted,
+            submitted=True,
+        )
+        self._entries[order.client_order_id] = entry
+        self._expose(entry, order.stop_loss, order.take_profit)
+        return entry
+
+    async def _recover_reads(
+        self, fresh: list[_Entry], results: dict[str, RecoveredEntry]
+    ) -> dict[str, dict[str, Any]]:
+        reads: dict[str, dict[str, Any]] = {}
+        for entry in fresh:
+            try:
+                buy = await self._read_ledger(entry)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                results[entry.entry_id] = self._recovery_failed(entry, error)
+                continue
+            if buy is None:
+                results[entry.entry_id] = RecoveredEntry(
+                    entry.entry_id, "not_placed", "a compra nunca chegou a corretora"
+                )
+            else:
+                reads[entry.entry_id] = buy
+        for symbol in {e.symbol for e in fresh if e.entry_id in reads}:
+            group = [e for e in fresh if e.symbol == symbol and e.entry_id in reads]
+            try:
+                await self._check_unattributed_sells(group)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                for entry in group:
+                    reads.pop(entry.entry_id, None)
+                    results[entry.entry_id] = self._recovery_failed(entry, error)
+        return reads
+
+    def _recovery_failed(self, entry: _Entry, error: Exception) -> RecoveredEntry:
+        detail = f"irreconstruivel agora ({type(error).__name__}: {error}); posicao tratada como exposta"
+        self._halt(f"{entry.entry_id}: recuperacao incompleta: {detail}")
+        self._alert_exposure(entry, "recuperacao apos reinicio incompleta")
+        return RecoveredEntry(entry.entry_id, "exposed", detail)
+
+    async def _rebuild(self, entry: _Entry) -> tuple[RecoveryOutcome, str]:
+        """Reconstrucao de UMA entrada (retomada de `exposed` nao reconstruido; `close_orphan`)."""
+        buy = await self._read_ledger(entry)
+        if buy is None:
+            return "not_placed", "a compra nunca chegou a corretora"
+        await self._check_unattributed_sells([entry])
+        return await self._apply_rebuilt(entry, buy)
+
+    async def _read_ledger(self, entry: _Entry) -> dict[str, Any] | None:
+        """So leitura (+ ledger e fills): a compra, ou None se nunca chegou a corretora (descarta)."""
+        symbol, cid = entry.symbol, entry.entry_id
+        buy = await self._get_order(symbol, cid, critical=True)
+        if buy is None:
+            if await self._get_list(symbol, derived_id(cid, "L0"), critical=True) is not None:
+                raise ProtectionError("lista L0 existe sem a ordem de compra")
+            self._entries.pop(cid, None)
+            entry.state, entry.closed_reason, entry.protection = "closed", "compra nunca enviada", None
+            return None
+        if (executed := Decimal(buy["executedQty"])) > 0:
+            await self._collect_fills(entry, buy, FillKind.ENTRY)
+            entry.bought_gross = max(entry.bought_gross, executed)
+        await self._register_recovered_orders(entry)
+        await self._sync_ledger(entry)
+        return buy
+
+    async def _check_unattributed_sells(self, group: list[_Entry]) -> None:
+        """Venda na conta apos a compra que nenhuma ordem reconstruida explica: `owed` pode estar inflado e
+        proteger/vender saldo alheio. Conservador: recusa (entrada `exposed`; manual via close_orphan)."""
+        symbol = group[0].symbol
+        starts = [
+            int(fill.filled_at.timestamp() * 1000)
+            for e in group
+            for fill in self._fills.all()
+            if fill.entry_id == e.entry_id and fill.kind is FillKind.ENTRY
+        ]
+        if not starts:
+            return
+        trades = await self._client.request(
+            "GET",
+            "/api/v3/myTrades",
+            {"symbol": to_exchange_symbol(symbol), "startTime": min(starts)},
+            signed=True,
+            weight=20,
+            critical=True,
+        )
+        unknown = [
+            t["id"] for t in trades if not t["isBuyer"] and not self._fills.knows(symbol, int(t["id"]))
+        ]
+        if unknown:
+            raise UnattributedSalesError(
+                f"{len(unknown)} venda(s) na conta apos a compra sem ordem conhecida (trades {unknown[:5]}); "
+                "informe exit_client_ids ou use close_orphan"
+            )
+
+    async def _apply_rebuilt(self, entry: _Entry, buy: dict[str, Any]) -> tuple[RecoveryOutcome, str]:
+        symbol = entry.symbol
+        executed = Decimal(buy["executedQty"])
+        filters = await self._filters_or_stale(symbol)
+        live = await self._find_live_protection(entry)
+        entry.rebuilt = True
+        o = entry.order
+        levels = (live.stop, live.target) if live else (o.stop_loss, o.take_profit)
+        entry.want_stop, entry.want_target = levels
+        buy_live = str(buy["status"]) not in _DONE
+        if executed == 0:
+            if buy_live:
+                entry.state, entry.protection = "working", None
+                return "working", "compra aguardando fill"
+            await self._close_flat(entry, f"entrada {str(buy['status']).lower()} sem fill")
+            return "flat", "compra encerrada sem fill"
+        if live is not None:
+            return await self._adopt_recovered(entry, live, filters, buy_open=buy_live)
+        if buy_live:
+            entry.state, entry.protection = "working", None
+            return "working", "fill parcial sem protecao viva; o proximo poll protege"
+        if self._is_flat(entry, filters):
+            await self._close_flat(entry, "posicao ja vendida antes do reinicio")
+            return "flat", "posicao encerrada"
+        entry.state = "working"
+        await self._advance_working(entry)
+        match entry.state:
+            case "protected":
+                return "reprotected", "protecao recolocada"
+            case "closed":
+                return "flat", "posicao encerrada"
+            case _:
+                return "working", "aguardando ativacao da protecao"
+
+    async def _adopt_recovered(
+        self, entry: _Entry, live: _Protection, filters: SymbolFilters, *, buy_open: bool
+    ) -> tuple[RecoveryOutcome, str]:
+        entry.protection, entry.state, entry.buy_open = live, "protected", buy_open
+        entry.exposed_since = None
+        total = filters.round_quantity_down(self._owed(entry))
+        if total - live.quantity >= filters.min_qty and total * live.stop >= filters.min_notional:
+            await self._replace(entry, live, live.stop, live.target, filters)
+            return "reprotected", f"protecao adotada cobria {live.quantity} de {total}; recolocada"
+        return "protected", f"protecao viva adotada (geracao {live.generation})"
+
+    async def _register_recovered_orders(self, entry: _Entry) -> None:
+        persisted = entry.recover
+        if persisted is None:
+            return
+        cid = entry.entry_id
+        entry.generation = max(entry.generation, persisted.generation + _GENERATION_LOOKAHEAD)
+        for generation in range(entry.generation + 1):
+            ids = self._ids(cid, generation)
+            self._track_legs(entry, generation, ids, oco=True)
+            self._track_legs(entry, generation, ids, oco=False)
+        sequence = 0
+        while sequence < _MAX_EMERGENCY_PROBES:
+            em = derived_id(cid, f"EM{sequence}")
+            if await self._get_order(entry.symbol, em, critical=True) is None:
+                break
+            entry.tracked[em] = _Tracked(FillKind.EMERGENCY, None)
+            sequence += 1
+        entry.em_seq = max(entry.em_seq, sequence)
+        for exit_id in persisted.exit_client_ids:
+            if await self._get_order(entry.symbol, exit_id, critical=True) is not None:
+                entry.tracked[exit_id] = _Tracked(FillKind.EXIT, None)
+
+    async def _find_live_protection(self, entry: _Entry) -> _Protection | None:
+        """Protecao NEW de maior geracao (OCO ou stop avulso) desta entrada na corretora."""
+        symbol, cid = entry.symbol, entry.entry_id
+        for generation in range(entry.generation, -1, -1):
+            ids = self._ids(cid, generation)
+            for stop_id, above_id in (
+                (ids["below"], ids["above"]),
+                (derived_id(cid, f"X{generation}"), None),
+            ):
+                leg = await self._get_order(symbol, stop_id, critical=True)
+                if leg is None or str(leg["status"]) != "NEW":
+                    continue
+                target: Decimal | None = None
+                if above_id is not None:
+                    above = await self._get_order(symbol, above_id, critical=True)
+                    if above is not None and str(above["status"]) == "NEW":
+                        target = Decimal(above["price"])
+                return _Protection(
+                    Decimal(leg["origQty"]) - Decimal(leg["executedQty"]),
+                    Decimal(leg["stopPrice"]),
+                    target,
+                    generation,
+                )
+        return None
+
+    async def close_orphan(
+        self, symbol: Symbol, quantity: Decimal, operator_confirmation: OperatorConfirmation
+    ) -> OrphanCloseResult:
+        """CAMINHO MANUAL: vende a mercado posicao reconstruida (`exposed`) que o robo nao conseguiu proteger.
+
+        Exige confirmacao do operador com a quantidade EXPLICITA (igual a `quantity`), motivo e identificacao.
+        A venda e limitada ao MENOR entre `quantity`, a posicao reconstruida (ledger) e o saldo livre,
+        respeita MARKET_LOT_SIZE (uma ordem por entrada, no maximo `maxQty`; repita) e e AUDITADA
+        (log estruturado + `on_audit`, antes e depois; auditoria que falha ANTES da venda a impede). Recusa se
+        houver protecao viva nao adotada: o `recover`/`poll` adota primeiro; protecao viva remanescente tem de
+        ser cancelada com seguranca antes. Permitido com o gateway pausado.
+        """
+        self._ensure_writable()
+        confirmation = operator_confirmation
+        if not confirmation.operator.strip() or not confirmation.reason.strip():
+            raise FilterViolationError("close_orphan exige operador e motivo")
+        if confirmation.confirmed_quantity != quantity or quantity <= 0:
+            raise FilterViolationError("quantidade confirmada pelo operador difere da solicitada")
+        filters = await self._filters.get(symbol)
+        targets = [e for e in self._entries.values() if e.symbol == symbol and e.state == "exposed"]
+        if not targets:
+            raise FilterViolationError("sem posicao orfa reconstruida para o simbolo")
+        async with contextlib.AsyncExitStack() as stack:
+            for held in targets:
+                await stack.enter_async_context(held.lock)
+            return await self._close_orphan_locked(symbol, quantity, confirmation, filters, targets)
+
+    async def _close_orphan_locked(
+        self,
+        symbol: Symbol,
+        quantity: Decimal,
+        confirmation: OperatorConfirmation,
+        filters: SymbolFilters,
+        targets: list[_Entry],
+    ) -> OrphanCloseResult:
+        owed: dict[str, Decimal] = {}
+        for held in targets:
+            if not held.rebuilt:
+                with contextlib.suppress(UnattributedSalesError):
+                    # O operador confirmou a quantidade explicitamente: o ledger ja foi lido e sincronizado.
+                    await self._rebuild(held)
+            if held.state != "exposed":
+                continue
+            if await self._find_live_protection(held) is not None:
+                raise ProtectionError(
+                    f"{held.entry_id}: protecao viva nao adotada; adote (recover/poll) ou cancele antes"
+                )
+            owed[held.entry_id] = await self._fresh_owed(held)
+        position = sum(owed.values(), _ZERO)
+        free = await self._free_base(symbol)
+        applied = filters.market_chunk(min(quantity, position, free))
+        if applied < filters.market_min:
+            raise FilterViolationError(
+                f"quantidade aplicavel {applied} abaixo do minimo de venda "
+                f"(posicao reconstruida {position}, saldo livre {free})"
+            )
+        base: dict[str, Any] = {
+            "symbol": symbol,
+            "operator": confirmation.operator,
+            "reason": confirmation.reason,
+            "requested": str(quantity),
+            "applied": str(applied),
+            "position": str(position),
+            "free": str(free),
+        }
+        self._audit("orphan_close_intent", **base)
+        executed, order_ids, remaining = _ZERO, [], applied
+        for held in targets:
+            take = filters.round_market_quantity_down(min(remaining, owed.get(held.entry_id, _ZERO)))
+            if take < filters.market_min:
+                continue
+            try:
+                done = await self._sell_market(held, take)
+            except LiveError as error:
+                self._audit("orphan_close_failed", **base, entry=held.entry_id, error=type(error).__name__)
+                raise
+            order_ids.append(derived_id(held.entry_id, f"EM{held.em_seq - 1}"))
+            executed, remaining = executed + done, remaining - take
+            if self._is_flat(held, filters):
+                await self._close_flat(held, f"orfao encerrado pelo operador {confirmation.operator}")
+        self._audit("orphan_close_done", **base, executed=str(executed), orders=order_ids)
+        return OrphanCloseResult(symbol, quantity, applied, executed, tuple(order_ids))
+
+    def _audit(self, event: str, **fields: Any) -> None:
+        record = {"event": event, "at": self._now().isoformat(), **fields}
+        log.warning("live_audit", **{("audit" if k == "event" else k): v for k, v in record.items()})
+        if self._audit_cb is not None:
+            self._audit_cb(record)
 
     # ---- reconciliacao ----------------------------------------------------------------------------
 

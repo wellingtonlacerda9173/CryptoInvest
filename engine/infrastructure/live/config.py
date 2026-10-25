@@ -90,6 +90,8 @@ class LiveConfig(DomainModel):
     stop_leg: Literal["stop_loss", "stop_loss_limit"] = "stop_loss"
     stop_limit_offset_bps: StrictDecimal = Field(default=Decimal(30), ge=1, le=500)
     min_stop_distance_bps: StrictDecimal = Field(default=Decimal(10), ge=1)
+    unsent_entry_margin_seconds: float = Field(default=0.1, ge=0)
+    emergency_realert_seconds: float = Field(default=60.0, gt=0)
     poll_interval_seconds: float = Field(default=1.0, gt=0)
     fallback_fee_rate: StrictDecimal = Field(default=Decimal("0.001"), ge=0, le=Decimal("0.01"))
 

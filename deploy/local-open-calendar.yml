@@ -1,0 +1,7 @@
+# SOMENTE TESTE. Uso: ./deploy/local-up.sh up --open-calendar
+# O robo passa a operar SEM cobertura do calendario de eventos (aviso a cada decisao) para voce ver entradas e saidas
+# em paper. O run usa outro id (`paper-local-open`) e fica INELEGIVEL para o Live para sempre: nunca serve de
+# evidencia para liberar dinheiro real. Para voltar ao normal, suba sem a flag (o run `paper-local` continua intacto).
+services:
+  runner:
+    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "paper-local-open", "--data-dir", "/var/lib/cryptoinvest/paper", "--json-logs", "--allow-open-calendar"]

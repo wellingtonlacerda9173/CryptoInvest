@@ -41,6 +41,12 @@ Segredos nunca ficam em codigo, `.env` ou logs. Cada segredo e um arquivo em `SE
 `binance_api_key`, `binance_api_secret`. O compose usa o mesmo arquivo como Docker secret.
 A fase 1 usa apenas dados publicos e nao requer chave da Binance.
 
+## Rodar tudo em Docker (local)
+
+`.\deploy\local-up.ps1 up` (Linux: `./deploy/local-up.sh up`) sobe o sistema completo (banco, Redis, API, robo de paper e
+painel em http://localhost:8088) em conteineres, com segredos gerados na primeira execucao. Passo a passo em
+`docs/local.md`. **Nao e producao** (HTTP em loopback, modo dev); producao e o Swarm abaixo.
+
 ## Implantacao
 
 Producao em Docker Swarm (modo PAPER; o Live segue bloqueado ate a fase 7B): `deploy/stack.yml`, Dockerfiles na raiz e o

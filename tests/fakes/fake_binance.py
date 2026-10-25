@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -101,6 +102,8 @@ class FakeBinance:
         self._runner: web.AppRunner | None = None
         self.base_url = ""
         self.redirect_to: str | None = None
+        self.before_dispatch: Callable[[Req], None] | None = None
+        self.after_dispatch: Callable[[Req], None] | None = None
         self.exposure_windows: list[tuple[float, int]] = []
         self._exposed_since: float | None = None
         self._exposed_requests = 0
@@ -204,7 +207,8 @@ class FakeBinance:
         raw = (await request.text()) if request.method != "GET" else request.query_string
         params = dict(parse_qsl(raw, keep_blank_values=True))
         path = request.path
-        self.log.append(Req(request.method, path, {k: v for k, v in params.items() if k != "signature"}))
+        req = Req(request.method, path, {k: v for k, v in params.items() if k != "signature"})
+        self.log.append(req)
         if self.redirect_to is not None:
             raise web.HTTPFound(f"{self.redirect_to}{request.path_qs}")
         fault = self._take_fault(request.method, path)
@@ -212,7 +216,11 @@ class FakeBinance:
             if fault.kind == "timeout":
                 await asyncio.sleep(30)
             return self._fault_response(fault)
+        if self.before_dispatch is not None:
+            self.before_dispatch(req)
         status, body = self._dispatch(request, params, raw)
+        if self.after_dispatch is not None:
+            self.after_dispatch(req)
         self._track_exposure(request=True)
         if fault and fault.after:
             if request.transport is not None:

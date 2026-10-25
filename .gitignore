@@ -25,3 +25,7 @@ reports/
 data/cache/
 data/paper/
 data/selector/
+
+# Local em Docker: segredos gerados e backups nunca sao versionados
+deploy/local-secrets/
+backups/

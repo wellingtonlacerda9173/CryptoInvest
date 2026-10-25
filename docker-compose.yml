@@ -1,0 +1,380 @@
+# CryptoInvest LOCAL: o sistema completo (banco, Redis, migracao, API, robo de paper e painel) com UM comando.
+#   .\deploy\local-up.ps1 up        (Windows)      ./deploy/local-up.sh up        (Linux/macOS)
+# NAO e producao (HTTP em loopback, cookie sem Secure, API em modo `dev`): producao e docs/deploy.md (Swarm).
+# Isolado do docker-compose.dev.yml: projeto, volumes, redes e portas proprios; so o painel e publicado, em 127.0.0.1.
+# Segredos: arquivos em deploy/local-secrets/ (gerados pelo local-up, nunca versionados), montados em /run/secrets.
+# Variaveis opcionais: CRYPTOINVEST_WEB_PORT (8088), CRYPTOINVEST_SECRETS_DIR, CRYPTOINVEST_TAG (local),
+# CRYPTOINVEST_DB_NAME (cryptoinvest; so o modo demo troca), RUNNER_RUN_ID (paper-local), LOG_LEVEL.
+name: cryptoinvest-local
+
+x-hardened: &hardened
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+x-env-common: &env-common
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_HOST: timescaledb
+  DATABASE_NAME: ${CRYPTOINVEST_DB_NAME:-cryptoinvest}
+  DATABASE_USER: cryptoinvest_app
+  REDIS_URL: redis://redis:6379/0
+
+x-env-api: &env-api
+  <<: *env-common
+  ENVIRONMENT: prod
+  # Unico relaxamento: modo `dev` da API + cookie sem Secure + origem http, porque o painel local e HTTP em loopback.
+  # Sem HSTS, sem confianca em X-Forwarded-For (um unico usuario local: o IP do proxy e o do throttle).
+  API_ENVIRONMENT: dev
+  API_COOKIE_SECURE: "false"
+  API_PANEL_ORIGINS: '["http://localhost:${CRYPTOINVEST_WEB_PORT:-8088}"]'
+  API_DATABASE_USER: cryptoinvest_api
+  API_RUNNER_DATA_DIR: /var/lib/cryptoinvest/paper
+  API_BACKTEST_CACHE_DIR: /var/lib/cryptoinvest/data/cache
+  API_BACKTEST_MAX_MEMORY_MB: "1024"
+
+x-secrets-api: &secrets-api
+  - {source: app_password, target: database_password}
+  - {source: api_database_password, target: api_database_password}
+  - {source: api_session_secret, target: api_session_secret}
+  - {source: api_master_keys, target: api_master_keys}
+  - {source: api_recovery_hmac_key, target: api_recovery_hmac_key}
+  - {source: live_authorization_hmac_key, target: api_live_authorization_hmac_key}
+  - {source: command_hmac_key, target: command_hmac_key}
+  - {source: redis_password, target: redis_password}
+
+x-migrate-secrets: &secrets-migrate
+  - {source: postgres_password, target: postgres_password}
+  - {source: migrator_password, target: migrator_password}
+  - {source: app_password, target: app_password}
+  - {source: api_database_password, target: api_database_password}
+
+x-tool: &tool
+  <<: *hardened
+  image: cryptoinvest/api:${CRYPTOINVEST_TAG:-local}
+  restart: "no"
+  profiles: ["tools"]
+  working_dir: /var/lib/cryptoinvest
+  environment:
+    <<: *env-api
+    PYTHONPATH: /app
+  secrets: *secrets-api
+  volumes:
+    - reports:/var/lib/cryptoinvest/reports
+    - cache:/var/lib/cryptoinvest/data/cache
+    - paper-data:/var/lib/cryptoinvest/paper
+    - type: tmpfs
+      target: /tmp
+      tmpfs: {size: 67108864}
+  networks: [backend, egress]
+  depends_on:
+    migrate: {condition: service_completed_successfully}
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.30.2-pg17@sha256:b346edcdb51a1fd6020e3965e0bd1c9f3406fa6d5fbce1e28f4852587ef934e2
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cryptoinvest
+      POSTGRES_USER: cryptoinvest
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    secrets:
+      - {source: postgres_password, target: postgres_password}
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+      - type: tmpfs
+        target: /var/run/postgresql
+        tmpfs: {size: 1048576}
+    networks: [backend]
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cryptoinvest -d cryptoinvest"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    restart: unless-stopped
+    # Senha so em arquivo em tmpfs (nunca em argv). AOF: os nonces dos comandos assinados sobrevivem a reinicio.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        umask 077
+        printf 'requirepass %s\n' "$$(cat /run/secrets/redis_password)" > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf --appendonly yes --appendfsync everysec --dir /data --protected-mode yes
+    user: "999:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    secrets:
+      - {source: redis_password, target: redis_password}
+    volumes:
+      - redis-data:/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 8388608}
+    networks: [backend]
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  migrate:
+    <<: *hardened
+    image: cryptoinvest/migrate:${CRYPTOINVEST_TAG:-local}
+    build: {context: ., dockerfile: Dockerfile, target: migrate}
+    restart: "no"
+    environment:
+      DATABASE_HOST: timescaledb
+      DATABASE_NAME: cryptoinvest
+      DATABASE_SUPERUSER: cryptoinvest
+    secrets: *secrets-migrate
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 16777216}
+    networks: [backend]
+    depends_on:
+      timescaledb: {condition: service_healthy}
+
+  api:
+    <<: *hardened
+    image: cryptoinvest/api:${CRYPTOINVEST_TAG:-local}
+    build: {context: ., dockerfile: Dockerfile, target: api}
+    environment: *env-api
+    secrets: *secrets-api
+    volumes:
+      - paper-data:/var/lib/cryptoinvest/paper
+      - cache:/var/lib/cryptoinvest/data/cache
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+    networks: [backend, edge, egress]
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "api"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      timescaledb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  # Robo em PAPER com dados de mercado PUBLICOS da Binance (sem chave). O calendario de eventos vem FECHADO: sem
+  # cobertura o robo recusa toda entrada (e o comportamento correto). Teste com calendario aberto: ver
+  # deploy/local-open-calendar.yml (o run vira INELEGIVEL para o Live).
+  runner:
+    <<: *hardened
+    image: cryptoinvest/runner:${CRYPTOINVEST_TAG:-local}
+    build: {context: ., dockerfile: Dockerfile, target: runner}
+    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "${RUNNER_RUN_ID:-paper-local}", "--data-dir", "/var/lib/cryptoinvest/paper", "--json-logs"]
+    stop_signal: SIGTERM
+    # Parada ordenada: o robo preserva os stops das posicoes abertas antes do SIGKILL.
+    stop_grace_period: 120s
+    environment:
+      <<: *env-common
+      ENVIRONMENT: prod
+      PAPER_WS_URL: ${PAPER_WS_URL:-wss://stream.binance.com:443}
+    secrets:
+      - {source: app_password, target: database_password}
+      - {source: command_hmac_key, target: command_hmac_key}
+      - {source: redis_password, target: redis_password}
+    volumes:
+      - paper-data:/var/lib/cryptoinvest/paper
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+    networks: [backend, egress]
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "runner"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      timescaledb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  # Painel + proxy. TRUSTED_LB_CIDR=127.0.0.1/32: o modo http do nginx exige um balanceador confiavel; aqui nao ha
+  # nenhum (o navegador fala direto com o proxy, chegando pelo gateway da rede Docker), entao confiamos so no
+  # loopback do proprio contêiner, de onde nunca vem trafego: o X-Forwarded-For enviado pelo cliente e IGNORADO
+  # (nao da para forjar o IP) e o stack de producao segue exigindo o CIDR real do balanceador.
+  web:
+    <<: *hardened
+    user: "101:101"
+    image: cryptoinvest/web:${CRYPTOINVEST_TAG:-local}
+    build: {context: ., dockerfile: Dockerfile.web, target: web}
+    environment:
+      PANEL_DOMAIN: localhost
+      TRUSTED_LB_CIDR: 127.0.0.1/32
+    ports:
+      - "127.0.0.1:${CRYPTOINVEST_WEB_PORT:-8088}:8080"
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 33554432}
+    networks: [frontend, edge]
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      api: {condition: service_healthy}
+
+  # ---- perfil `tools`: sob demanda, `docker compose run --rm <servico> [argumentos]` (sem portas) ----------------
+  backtest:
+    <<: *tool
+    entrypoint: ["python", "-m", "engine.runner.backtest"]
+
+  validate:
+    <<: *tool
+    entrypoint: ["python", "-m", "engine.runner.validate"]
+
+  lessons:
+    <<: *tool
+    entrypoint: ["python", "-m", "engine.runner.lessons"]
+
+  admin:
+    <<: *tool
+    entrypoint: ["python", "-m", "api.cli"]
+
+  # ---- perfil `demo` (so via deploy/local-up demo): banco SEPARADO `cryptoinvest_demo` ---------------------------
+  demo-migrate:
+    <<: *hardened
+    image: cryptoinvest/migrate:${CRYPTOINVEST_TAG:-local}
+    restart: "no"
+    profiles: ["demo"]
+    environment:
+      DATABASE_HOST: timescaledb
+      DATABASE_NAME: cryptoinvest_demo
+      DATABASE_SUPERUSER: cryptoinvest
+    secrets: *secrets-migrate
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 16777216}
+    networks: [backend]
+    depends_on:
+      timescaledb: {condition: service_healthy}
+
+  demo-seed:
+    <<: *hardened
+    image: cryptoinvest/api:${CRYPTOINVEST_TAG:-local}
+    restart: "no"
+    profiles: ["demo"]
+    entrypoint: ["python", "-m", "engine.runner.demo_seed"]
+    working_dir: /var/lib/cryptoinvest
+    environment:
+      <<: *env-common
+      DATABASE_NAME: cryptoinvest_demo
+      PYTHONPATH: /app
+    secrets:
+      - {source: app_password, target: database_password}
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 16777216}
+    networks: [backend]
+    depends_on:
+      timescaledb: {condition: service_healthy}
+
+  # ---- perfil `ai` (desligado por padrao): analista de IA; exige o arquivo deploy/local-secrets/anthropic_api_key ---
+  # Uso: docker compose --profile ai up -d ai-api  (substitui a `api` por uma com a chave; pare a `api` antes).
+  ai-api:
+    <<: *hardened
+    image: cryptoinvest/api:${CRYPTOINVEST_TAG:-local}
+    profiles: ["ai"]
+    environment: *env-api
+    secrets:
+      - {source: app_password, target: database_password}
+      - {source: api_database_password, target: api_database_password}
+      - {source: api_session_secret, target: api_session_secret}
+      - {source: api_master_keys, target: api_master_keys}
+      - {source: api_recovery_hmac_key, target: api_recovery_hmac_key}
+      - {source: live_authorization_hmac_key, target: api_live_authorization_hmac_key}
+      - {source: command_hmac_key, target: command_hmac_key}
+      - {source: redis_password, target: redis_password}
+      - {source: anthropic_api_key, target: anthropic_api_key}
+    volumes:
+      - paper-data:/var/lib/cryptoinvest/paper
+      - cache:/var/lib/cryptoinvest/data/cache
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+    networks:
+      backend: {}
+      edge: {aliases: [api]}
+      egress: {}
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "api"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+
+networks:
+  # banco e Redis: sem rota para fora
+  backend:
+    internal: true
+  # proxy <-> api
+  edge:
+    internal: true
+  # so saida (Binance publica); nenhum servico escuta nela
+  egress: {}
+  # so o proxy (e por onde a porta do painel e publicada)
+  frontend: {}
+
+volumes:
+  timescale-data:
+  redis-data:
+  paper-data:
+  cache:
+  reports:
+
+secrets:
+  postgres_password:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/postgres_password
+  migrator_password:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/migrator_password
+  app_password:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/app_password
+  api_database_password:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/api_database_password
+  redis_password:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/redis_password
+  api_session_secret:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/api_session_secret
+  api_master_keys:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/api_master_keys
+  api_recovery_hmac_key:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/api_recovery_hmac_key
+  command_hmac_key:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/command_hmac_key
+  live_authorization_hmac_key:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/live_authorization_hmac_key
+  # so o perfil `ai`: nao e gerado; crie-o voce mesmo (a chave nunca entra no repositorio)
+  anthropic_api_key:
+    file: ${CRYPTOINVEST_SECRETS_DIR:-./deploy/local-secrets}/anthropic_api_key

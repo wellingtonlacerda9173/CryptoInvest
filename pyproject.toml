@@ -57,6 +57,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
 "api/audit.py" = ["S105"]
+"engine/runner/demo_seed.py" = ["E501"]
 "tests/**" = ["S101", "S608", "PT012", "PT018"]
 "tests/*/api/**" = ["E501", "S101", "S105", "S106", "S608", "PT012", "PT018", "F401", "F811"]
 "tests/api_support.py" = ["S105"]

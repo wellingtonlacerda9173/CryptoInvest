@@ -35,9 +35,9 @@ from engine.domain.types import Timeframe
 from engine.infrastructure.config.settings import load_settings
 from engine.infrastructure.persistence.candle_repository import CandleRepository
 from engine.infrastructure.persistence.lesson_repository import SqlLessonStore
-from engine.infrastructure.persistence.models import DecisionRow, TradeRow
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.command_channel import RedisCommandSource, load_command_key
+from engine.runner.demo_seed import seed_screens
 from engine.runner.paper_control import CommandQueue
 from engine.runner.paper_events import RedisEventBus, RedisKeys
 from tests.api_support import GOOD_PASSWORD
@@ -73,50 +73,13 @@ class _FakeBinance(BaseHTTPRequestHandler):
         return
 
 
-_E2E_TRADES = (
-    (20, "115.5", "113", "stop_loss", "-25.2", "-1.0"),
-    (8, "118", "121", "take_profit", "29.8", "1.2"),
-)
-
-
 def _seed_screens(url: object) -> None:
-    """Dados extras das telas Mercado/Decisoes/Operacoes (so no banco `*_test` descartavel desta pilha):
-    uma decisao com regime, notas e parecer de IA, e uma perda e um ganho em precos coerentes com as velas."""
+    """Dados extras das telas Mercado/Decisoes/Operacoes (so no banco `*_test` descartavel desta pilha)."""
 
     async def go() -> None:
         engine = create_engine(url)  # type: ignore[arg-type]
         try:
-            now = datetime.now(UTC).replace(microsecond=0)
-            async with create_session_factory(engine).begin() as db:
-                db.add(
-                    DecisionRow(
-                        decision_key="e2e-rich", run_id=RUN_ID, decided_at=now - timedelta(seconds=30),
-                        symbol="BTC/USDT", action="skip", traded=False, code="reward_risk",
-                        reason="reward_risk: tecnico", strategy="elephant", confidence=0.72,
-                        signal_id="e2e-sig",
-                        signal={
-                            "symbol": "BTC/USDT", "strategy": "elephant", "entry": "123", "stop_loss": "120",
-                            "take_profit": "127", "regime": "tendência de alta",
-                            "scores": [
-                                {"strategy": "elephant", "score": 0.72},
-                                {"strategy": "ema", "score": 0.41},
-                            ],
-                            "ai_opinion": "Contexto favorável, mas o ganho é pequeno para o risco.",
-                        },
-                        context={},
-                    )
-                )  # fmt: skip
-                for index, (hours, entry, exit_, reason, pnl, r) in enumerate(_E2E_TRADES):
-                    closed = now - timedelta(hours=hours)
-                    db.add(
-                        TradeRow(
-                            trade_id=f"e2e{index}", run_id=RUN_ID, symbol="BTC/USDT", quantity=Decimal(10),
-                            entry_price=Decimal(entry), exit_price=Decimal(exit_), entry_fee=Decimal("0.1"),
-                            exit_fee=Decimal("0.1"), pnl=Decimal(pnl), opened_at=closed - timedelta(hours=5),
-                            closed_at=closed, exit_reason=reason, strategy="elephant",
-                            risk_amount=Decimal("25"), r_multiple=Decimal(r),
-                        )
-                    )  # fmt: skip
+            await seed_screens(create_session_factory(engine), RUN_ID)
         finally:
             await engine.dispose()
 

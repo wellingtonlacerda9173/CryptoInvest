@@ -1,7 +1,7 @@
 # ruff: noqa: E501
 """3a revisao QA do 7B-1: provas contra o ledger/_watch/deadline reescritos. Somente a fake local.
 
-Testes `xfail(strict)` com 'BUG:' sao EVIDENCIA de defeito ainda aberto no codigo de producao.
+Todos os defeitos desta rodada foram corrigidos (sem `xfail`); os testes seguem como regressao.
 """
 
 import asyncio
@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 
 from engine.domain.order import ExitOrder, OrderType
-from engine.infrastructure.live.errors import FilterViolationError
 from tests.fakes.fake_binance import FakeBinance
 from tests.unit.live.support import NOW, SYMBOL, Rig, approved_entry, build_rig
 
@@ -54,10 +53,6 @@ async def settle(coro: Callable[[], Awaitable[Any]]) -> BaseException | None:
 # ---- ledger obsoleto: saida em entrada nao protegida -----------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: saida em entrada nao protegida usa ledger obsoleto (sem _sync_ledger) e vende saldo alheio",
-)
 async def test_exit_before_first_poll_after_target_filled_never_sells_foreign_balance(
     fake: FakeBinance,
 ) -> None:
@@ -81,9 +76,6 @@ async def test_exit_before_first_poll_after_target_filled_never_sells_foreign_ba
 # ---- reserva de capital que vaza -------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: place_order cancelado antes do POST deixa entrada fantasma e reserva presa"
-)
 async def test_cancelled_place_before_any_order_is_sent_does_not_leak_capital_reservation(
     fake: FakeBinance,
 ) -> None:
@@ -111,9 +103,6 @@ async def test_cancelled_place_before_any_order_is_sent_does_not_leak_capital_re
         await rig.client.aclose()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: entrada working sem ordem na corretora nunca e encerrada (poll so retorna)"
-)
 async def test_entry_whose_post_never_reached_the_exchange_is_not_kept_forever(fake: FakeBinance) -> None:
     """Fantasma: entrada registrada, POST nunca vingou e `_entry_exists` respondeu 'desconhecido' => fica
     `working` para sempre (poll so retorna), segurando capital e o client id."""
@@ -137,26 +126,31 @@ async def test_entry_whose_post_never_reached_the_exchange_is_not_kept_forever(f
 # ---- posicao orfa apos reinicio -------------------------------------------------------------------------
 
 
-async def test_after_restart_the_new_gateway_cannot_close_or_protect_the_previous_position(
+async def test_after_restart_the_new_gateway_recovers_and_can_close_the_previous_position(
     fake: FakeBinance,
 ) -> None:
-    """Documenta o contrato (aceito pelo engenheiro) e o RISCO: nao ha caminho no gateway para reconciliar,
-    proteger ou vender uma posicao criada por uma instancia anterior."""
+    """Antes documentava o RISCO (posicao orfa sem caminho de reconciliacao); agora `recover` reconstroi."""
+    from engine.infrastructure.live.recovery import PersistedEntry
+
     first = build_rig(fake)
-    await first.gateway.place_order(approved_entry())
+    approved = approved_entry()
+    await first.gateway.place_order(approved)
     fake.set_price("BTCUSDT", D(99))
     await first.gateway.poll()
     await first.client.aclose()
 
     second = build_rig(fake)
     try:
-        error = await settle(lambda: second.gateway.place_order(market_exit("10")))
-        result = await second.gateway.reconcile([])
+        persisted = PersistedEntry(order=approved.order, expires_at=approved.guards.expires_at)
+        result = await second.gateway.recover([persisted])
+        reconciled = await second.gateway.reconcile([])
+        report = await second.gateway.place_order(market_exit("10"))
 
-        assert isinstance(error, FilterViolationError)
-        assert not result.ok  # OCO viva e posicao desconhecidas: pausa permanente ate intervencao manual
-        assert second.gateway.halted
-        assert second.gateway.open_entry_ids() == []
+        assert [r.outcome for r in result.entries] == ["protected"]
+        assert not [m for m in reconciled.unknown_open_orders], reconciled.describe()
+        assert report.filled_quantity == D(10)
+        assert second.gateway.entry_state("e-1") == "closed"
+        assert fake.uncovered_base() == 0 and fake.free("BTC") == 0
     finally:
         await second.client.aclose()
 
@@ -233,9 +227,6 @@ async def test_deadline_cutting_a_post_that_never_arrived_sells_only_what_the_en
 # ---- ruido / falso pause ------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: alerta critico espurio de SEM PROTECAO quando o alvo ja vendeu tudo"
-)
 async def test_target_filled_before_first_poll_closes_flat_without_critical_unprotected_alert(
     fake: FakeBinance,
 ) -> None:
@@ -256,9 +247,6 @@ async def test_target_filled_before_first_poll_closes_flat_without_critical_unpr
         await rig.client.aclose()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: leitura transitoria na conclusao normal da OCO pausa o gateway (falso positivo)"
-)
 async def test_transient_read_failures_when_oco_completes_do_not_pause_gateway(fake: FakeBinance) -> None:
     """Alvo executa; as leituras do ledger falham no momento da conclusao. A posicao esta FECHADA na
     corretora: pausar o gateway (exige resume manual) e falso positivo."""

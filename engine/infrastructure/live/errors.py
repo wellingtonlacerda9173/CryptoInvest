@@ -53,6 +53,10 @@ class ProtectionError(LiveError):
     """Operacao recusada porque deixaria (ou deixou) a posicao sem protecao valida."""
 
 
+class UnattributedSalesError(ProtectionError):
+    """Venda na conta apos a compra que nenhuma ordem reconstruida explica (recuperacao recusada)."""
+
+
 class ProtectiveOrderCancelError(ProtectionError):
     """Cancelar OCO/stop fora de raise_stop, emergencia ou venda executada e proibido."""
 
