@@ -48,6 +48,7 @@ EXPECTED_ADMIN_ROUTES = {
     ("POST", "/control/reactivate"),
     ("POST", "/control/power"),
     ("POST", "/live/activate"),
+    ("POST", "/live/authorization/revoke"),
     ("POST", "/settings/validate"),
     ("PUT", "/settings/{section}"),
     ("POST", "/onboarding/start-paper"),
@@ -131,6 +132,7 @@ def test_sensitive_admin_routes_require_fresh_auth(app: FastAPI) -> None:
         ("DELETE", "/credentials/{credential_id}"),
         ("POST", "/control/reactivate"),
         ("POST", "/live/activate"),
+        ("POST", "/live/authorization/revoke"),
         ("PUT", "/settings/{section}"),
         ("POST", "/ai/lessons/{lesson_id}/review"),
     }

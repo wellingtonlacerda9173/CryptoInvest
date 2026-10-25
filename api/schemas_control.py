@@ -1,9 +1,13 @@
 """Contrato do controle do robô: comandos, estado de entrega e ativação do Live (bloqueada nesta fase)."""
 
+import uuid
 from datetime import datetime
-from typing import Annotated, Literal, Self
+from decimal import Decimal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from engine.application.live_authorization import LIVE_PHRASE
 
 CommandState = Literal[
     "pending_delivery",
@@ -19,7 +23,6 @@ CommandKind = Literal["pause", "resume", "stop", "emergency-stop", "reactivate",
 OperatorName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=60)]
 ReasonText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=280)]
 
-LIVE_PHRASE = "OPERAR COM DINHEIRO REAL"
 LIVE_UNAVAILABLE = "Live ainda não disponível"
 
 
@@ -103,10 +106,52 @@ class PowerOut(_Out):
 
 
 class LiveActivationRequest(BaseModel):
-    """Aceita qualquer corpo: nesta fase a resposta é sempre 409 e o modo nunca muda."""
+    """Pedido de AUTORIZACAO do Live. Todos os campos sao opcionais: o servidor lista o que faltar (409)."""
 
-    phrase: str | None = Field(default=None, max_length=64, description=f"Frase fixa: {LIVE_PHRASE}")
-    code: str | None = Field(default=None, max_length=12)
+    model_config = ConfigDict(extra="ignore")
+
+    phrase: str | None = Field(default=None, max_length=64, description=f"Frase exata: {LIVE_PHRASE}")
+    confirm_real_money: bool = Field(default=False, description="Confirmacao explicita do dinheiro real")
+    initial_capital_quote: Decimal | None = Field(
+        default=None, description="Capital inicial reduzido do Live, na moeda de cotacao"
+    )
+    reason: str | None = Field(default=None, min_length=3, max_length=280, description="Motivo da ativacao")
+    run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    credential_id: uuid.UUID | None = Field(default=None, description="Chave; padrao: a mais recente")
+    code: str | None = Field(default=None, max_length=12, description="Ignorado (legado)")
+
+
+class LiveRevocationRequest(BaseModel):
+    reason: ReasonText
+
+
+class LiveAuthorizationOut(_Out):
+    id: str
+    paper_run_id: str
+    actor: str
+    reason: str
+    initial_capital_quote: Decimal
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    revoked_by: str | None
+    revocation_reason: str | None
+    active: bool
+    record_hash: str
+    criteria: dict[str, Any]
+
+
+class LiveAuthorizationStateOut(_Out):
+    """`live_available` segue falso: autorizar nao inicia nada (a integracao com o runner e outra etapa)."""
+
+    authorization: LiveAuthorizationOut | None
+    stage: str
+    days_in_live: int
+    limit_increase_allowed: bool
+    next_step: str
+    reduced_capital_days: int
+    limit_increase_days: int
+    live_available: bool
 
 
 class OnboardingStepOut(_Out):

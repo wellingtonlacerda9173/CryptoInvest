@@ -1,0 +1,16 @@
+# Habilita o analista de IA (opcional): crie o secret cryptoinvest_anthropic_api_key (valor por stdin) e rode
+#   docker stack deploy -c deploy/stack.yml -c deploy/stack.ai.yml cryptoinvest
+version: "3.9"
+
+services:
+  runner:
+    secrets:
+      - {source: anthropic_api_key, target: anthropic_api_key, uid: "10001", gid: "10001", mode: 0400}
+  api:
+    secrets:
+      - {source: anthropic_api_key, target: anthropic_api_key, uid: "10001", gid: "10001", mode: 0400}
+
+secrets:
+  anthropic_api_key:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_anthropic_api_key

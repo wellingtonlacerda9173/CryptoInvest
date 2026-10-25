@@ -417,7 +417,7 @@ async def test_power_off_on_and_the_launcher_guard(
 # --------------------------------------------------------------------------- Live
 
 
-async def test_live_activation_is_always_409_and_never_changes_anything(
+async def test_live_activation_is_refused_while_criteria_are_unmet_and_never_changes_anything(
     rh: Harness, rh_admin: Session, rh_reader: Session, fake_link: FakeLink
 ) -> None:
     alive(rh, fake_link)
@@ -429,7 +429,12 @@ async def test_live_activation_is_always_409_and_never_changes_anything(
         {"phrase": "OPERAR COM DINHEIRO REAL", "code": rh.code_for(rh_admin.username)},
     ):
         response = await rh_admin.send("POST", "/live/activate", json=body)
-        assert response.status_code == 409 and response.json()["detail"] == "Live ainda não disponível", body
+        assert response.status_code == 409 and response.json()["detail"].startswith("Live nao autorizado"), (
+            body
+        )
+        assert {e["code"] for e in response.json()["errors"]} >= {"no_test", "operating_days", "phrase"} - (
+            {"phrase"} if body.get("phrase") else set()
+        )
     assert (await rh_reader.send("POST", "/live/activate", json={})).status_code == 403
     after = (await rh_admin.get("/status")).json()
     assert after["mode"] == before["mode"] == "paper" and after["live"]["live_available"] is False
@@ -438,7 +443,7 @@ async def test_live_activation_is_always_409_and_never_changes_anything(
     assert (
         len(refused) == 3
         and refused[0]["result"] == "denied"
-        and refused[0]["details"]["reason"] == "Live ainda não disponível"
+        and any(u["criterion"] == "operating_days" for u in refused[0]["details"]["unmet"])
     )
 
 

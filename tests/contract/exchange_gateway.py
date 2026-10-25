@@ -63,10 +63,19 @@ class ExchangeGatewayContract:
     def sent_orders(self, gateway: ExchangeGateway) -> list[Order]:
         raise NotImplementedError
 
-    async def test_place_order_sends_valid_orders_unchanged(self, gateway: ExchangeGateway) -> None:
-        entry, exit_ = valid_entry(), valid_exit()
+    def entry_submission(self, **changes: Any) -> tuple[Any, Order]:
+        """(o que se entrega a `place_order`, a ordem que deve chegar a corretora), com adulteracao opcional.
 
-        reports = [await gateway.place_order(entry), await gateway.place_order(exit_)]
+        Gateways que exigem entrada aprovada pelo gate (Live) sobrescrevem para embrulhar em `ApprovedEntry`.
+        """
+        order = tampered(valid_entry(), **changes)
+        return order, order
+
+    async def test_place_order_sends_valid_orders_unchanged(self, gateway: ExchangeGateway) -> None:
+        submission, entry = self.entry_submission()
+        exit_ = valid_exit()
+
+        reports = [await gateway.place_order(submission), await gateway.place_order(exit_)]
 
         assert all(isinstance(report, OrderReport) for report in reports)
         assert [r.client_order_id for r in reports] == [entry.client_order_id, exit_.client_order_id]
@@ -83,9 +92,9 @@ class ExchangeGatewayContract:
             return original(order)
 
         monkeypatch.setattr(self.revalidate_module, "revalidate_order", spy)
-        order = valid_entry()
+        submission, order = self.entry_submission()
 
-        await gateway.place_order(order)
+        await gateway.place_order(submission)
 
         assert seen == [order]
 
@@ -102,8 +111,10 @@ class ExchangeGatewayContract:
     async def test_place_order_refuses_tampered_entry_order(
         self, gateway: ExchangeGateway, changes: dict[str, Any]
     ) -> None:
+        submission, _ = self.entry_submission(**changes)
+
         with pytest.raises(ValidationError):
-            await gateway.place_order(tampered(valid_entry(), **changes))
+            await gateway.place_order(submission)
 
         assert self.sent_orders(gateway) == []
 

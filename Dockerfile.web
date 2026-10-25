@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.7
+# Painel estatico + proxy reverso: alvos `web` (HTTP 8080, TLS no balanceador) e `web-tls` (HTTPS 8443 com secrets)
+
+FROM node:24.12.0-alpine3.23@sha256:c921b97d4b74f51744057454b306b418cf693865e73b8100559189605f6955b8 AS build
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+COPY deploy/web/check-dist.mjs deploy/web/snippets/headers.conf /check/
+RUN node /check/check-dist.mjs /web/dist /check/headers.conf
+
+FROM nginxinc/nginx-unprivileged:1.29.4-alpine@sha256:a6c4f61f456b85b8fdf7ec7ab28cc3e299440e6fb4a9dea520e5fd8fd440025e AS common
+USER root
+RUN rm -f /etc/nginx/conf.d/*.conf
+COPY deploy/web/nginx.conf /etc/nginx/nginx.conf
+COPY deploy/web/snippets/ /etc/nginx/snippets/
+COPY deploy/web/entrypoint.sh /docker-entrypoint-web.sh
+RUN chmod 0755 /docker-entrypoint-web.sh
+COPY --from=build /web/dist /usr/share/nginx/html
+USER 101:101
+ENTRYPOINT ["/docker-entrypoint-web.sh"]
+
+FROM common AS web
+ENV WEB_MODE=http
+COPY deploy/web/server-http.conf /etc/nginx/templates/server.conf.template
+EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+
+FROM common AS web-tls
+ENV WEB_MODE=tls
+COPY deploy/web/server-tls.conf /etc/nginx/templates/server.conf.template
+EXPOSE 8080 8443
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]

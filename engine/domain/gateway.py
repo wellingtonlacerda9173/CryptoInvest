@@ -55,3 +55,11 @@ class ProtectedOrderGateway(ExchangeGateway, Protocol):
     def drop_target(self, client_order_id: str) -> OrderReport:
         """Transforma o OCO em stop puro: o alvo passa a ser gerido por ordens manuais (parcial)."""
         ...
+
+
+class AsyncProtectedOrderGateway(ExchangeGateway, Protocol):
+    """`ProtectedOrderGateway` assincrono para gateways com rede (Live): trocar o OCO exige I/O."""
+
+    async def raise_stop(self, client_order_id: str, new_stop: Decimal) -> OrderReport: ...
+
+    async def drop_target(self, client_order_id: str) -> OrderReport: ...

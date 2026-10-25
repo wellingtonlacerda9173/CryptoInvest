@@ -1,0 +1,16 @@
+# Publica o proxy em HTTP (porta 8080 do no): use SOMENTE atras de um terminador TLS (balanceador/proxy do host).
+#   export TRUSTED_LB_CIDR=10.0.0.5/32   # IP/CIDR do balanceador (seu X-Forwarded-For passa a valer)
+#   docker stack deploy -c deploy/stack.yml -c deploy/stack.http.yml cryptoinvest
+# mode host preserva o IP real do cliente (o ingress do Swarm o troca por SNAT e quebraria o throttle por IP).
+version: "3.9"
+
+services:
+  web:
+    environment:
+      # IP/CIDR do balanceador que termina o TLS (obrigatorio): so dele o X-Forwarded-For e confiavel (real_ip)
+      TRUSTED_LB_CIDR: ${TRUSTED_LB_CIDR:?defina TRUSTED_LB_CIDR (IP/CIDR do balanceador)}
+    ports:
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: host

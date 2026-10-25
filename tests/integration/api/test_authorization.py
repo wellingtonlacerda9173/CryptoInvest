@@ -37,6 +37,9 @@ ADMIN_ONLY = {
     ("POST", "/control/reactivate"),
     ("POST", "/control/power"),
     ("POST", "/live/activate"),
+    ("POST", "/live/authorization/revoke"),
+    ("POST", "/ai/lessons/run"),
+    ("POST", "/ai/lessons/{lesson_id}/review"),
     ("POST", "/settings/validate"),
     ("PUT", "/settings/{section}"),
     ("POST", "/onboarding/start-paper"),
@@ -56,6 +59,7 @@ def concrete(path: str) -> str:
         .replace("{job_id}", uuid.uuid4().hex)
         .replace("{command_id}", uuid.uuid4().hex)
         .replace("{section}", "risk")
+        .replace("{lesson_id}", uuid.uuid4().hex)
     )
 
 

@@ -107,9 +107,10 @@ def _permissions_from(payload: Any) -> KeyPermissions:
         can_read=payload["enableReading"],
         can_trade=payload["enableSpotAndMarginTrading"],
         can_withdraw=payload["enableWithdrawals"],
-        can_transfer=payload.get("enableInternalTransfer") is True
+        # Falha fechada: flag AUSENTE (ou nao booleana) nao prova que a chave nao transfere/opera margem.
+        can_transfer=payload.get("enableInternalTransfer") is not False
         or payload.get("permitsUniversalTransfer") is True,
-        margin_enabled=payload.get("enableMargin") is True,
+        margin_enabled=payload.get("enableMargin") is not False,
         futures_enabled=payload.get("enableFutures") is True,
         ip_restricted=ip if isinstance(ip := payload.get("ipRestrict"), bool) else None,
     )

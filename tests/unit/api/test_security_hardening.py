@@ -245,7 +245,8 @@ def test_permissions_fail_closed_on_anything_but_explicit_booleans(payload: Any)
 
 
 def test_permissions_parse_a_complete_payload() -> None:
-    permissions = _permissions_from({**FLAGS, "enableWithdrawals": True, "ipRestrict": True})
+    explicit = {"enableInternalTransfer": False, "enableMargin": False}
+    permissions = _permissions_from({**FLAGS, **explicit, "enableWithdrawals": True, "ipRestrict": True})
     assert permissions.can_read and permissions.can_trade and permissions.can_withdraw
     assert permissions.ip_restricted is True and permissions.can_transfer is False
     assert _permissions_from(FLAGS).ip_restricted is None
@@ -386,3 +387,33 @@ def test_new_master_key_appends_on_its_own_line_and_keeps_the_ring_valid(tmp_pat
     ring = KeyRing.parse(path.read_text(encoding="utf-8"))
     assert sorted(ring.keys) == [1, 2, 3] and ring.active_version == 3
     assert "\n\n" not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "relaxed",
+    [
+        {"live_require_ip_restriction": False},
+        {"live_block_on_key_warnings": False},
+        {"live_initial_capital_cap_quote": 101},
+    ],
+)
+def test_production_refuses_to_relax_the_live_activation_gate(relaxed: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="producao nao permite"):
+        _prod(**relaxed)
+
+    assert _prod().live_initial_capital_cap_quote == 100
+
+
+def test_the_live_gate_can_still_be_stricter_in_production() -> None:
+    assert _prod(live_initial_capital_cap_quote=50).live_initial_capital_cap_quote == 50
+
+
+@pytest.mark.parametrize("missing", ["enableMargin", "enableInternalTransfer"])
+def test_absent_margin_or_transfer_flags_count_as_unsafe(missing: str) -> None:
+    safe = {**FLAGS, "enableMargin": False, "enableInternalTransfer": False}
+    assert not _permissions_from(safe).margin_enabled and not _permissions_from(safe).can_transfer
+    payload = {k: v for k, v in safe.items() if k != missing}
+
+    permissions = _permissions_from(payload)
+
+    assert permissions.margin_enabled if missing == "enableMargin" else permissions.can_transfer

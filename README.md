@@ -41,6 +41,11 @@ Segredos nunca ficam em codigo, `.env` ou logs. Cada segredo e um arquivo em `SE
 `binance_api_key`, `binance_api_secret`. O compose usa o mesmo arquivo como Docker secret.
 A fase 1 usa apenas dados publicos e nao requer chave da Binance.
 
+## Implantacao
+
+Producao em Docker Swarm (modo PAPER; o Live segue bloqueado ate a fase 7B): `deploy/stack.yml`, Dockerfiles na raiz e o
+runbook em `docs/deploy.md` (secrets, build, deploy, migracao, backup/restauracao, rotacao de chaves, checklist).
+
 ## Regras de dominio garantidas por tipo
 
 - `EntryOrder` nao existe sem `stop_loss` (campo obrigatorio, abaixo do preco de entrada); `Signal` exige alvo e

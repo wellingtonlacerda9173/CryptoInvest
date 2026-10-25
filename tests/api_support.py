@@ -12,6 +12,7 @@ from api.config import ApiSettings
 
 MASTER_KEY_V1 = base64.b64encode(bytes(range(32))).decode()
 MASTER_KEY_V2 = base64.b64encode(bytes(range(32, 64))).decode()
+LIVE_MAC_KEY = "live-authorization-mac-key-for-tests-0123456789"
 GOOD_PASSWORD = "cavalo azul voa sobre 7 montanhas!"
 OTHER_PASSWORD = "bule roxo canta tres musicas 42?"
 
@@ -29,6 +30,7 @@ def make_settings(**overrides: Any) -> ApiSettings:
         "unlock_recheck_seconds": 0.0,
         "session_secret": SecretStr(secrets.token_urlsafe(48)),
         "master_keys": SecretStr(f"1:{MASTER_KEY_V1}"),
+        "live_authorization_hmac_key": SecretStr(LIVE_MAC_KEY),
         # prefixo proprio: os testes nunca leem nem escrevem as chaves Redis de um robo de desenvolvimento
         "redis_prefix": f"cryptoinvest:test:{secrets.token_hex(4)}",
     }

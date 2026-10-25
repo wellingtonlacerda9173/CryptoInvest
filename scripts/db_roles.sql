@@ -78,6 +78,8 @@ GRANT SELECT, INSERT ON
 GRANT SELECT ON ai_lesson_reviews TO :"app_role";
 -- configuracao versionada: o robo so LE a ultima versao no start (quem grava e a API)
 GRANT SELECT ON config_versions TO :"app_role";
+-- autorizacao do Live: o robo so LE (para saber se ha autorizacao ativa e nao revogada); quem grava e a API
+GRANT SELECT ON live_authorizations, live_authorization_revocations TO :"app_role";
 
 -- mutaveis: UPDATE apenas nas colunas que a aplicacao de fato altera (SELECT ... FOR UPDATE o exige)
 GRANT SELECT, INSERT ON runs, orders, positions, candles TO :"app_role";
@@ -101,6 +103,8 @@ GRANT SELECT ON
     TO :"api_role";
 -- revisao humana de licoes: append-only (sem UPDATE/DELETE); a mais recente por licao vale
 GRANT SELECT, INSERT ON ai_lesson_reviews TO :"api_role";
+-- autorizacao do Live e revogacao: append-only (sem UPDATE/DELETE)
+GRANT SELECT, INSERT ON live_authorizations, live_authorization_revocations TO :"api_role";
 -- Auditoria e configuracao versionada: so SELECT e INSERT (append-only tambem por privilegio).
 GRANT SELECT, INSERT ON audit_log, config_versions TO :"api_role";
 -- Fila de comandos e jobs: a API cria a linha; depois so avanca o ESTADO (nunca reescreve o pedido).
@@ -118,7 +122,13 @@ GRANT UPDATE (
 ) ON users TO :"api_role";
 GRANT SELECT, INSERT, UPDATE, DELETE ON user_sessions, recovery_codes, exchange_credentials TO :"api_role";
 
--- alembic_version nao e visivel ao robo (nenhum GRANT).
+-- alembic_version nao e visivel ao robo (nenhum GRANT). A versao do schema chega por esta funcao (so le a versao),
+-- usada pela checagem de subida da API e do runner (engine/infrastructure/persistence/schema_check.py).
+CREATE OR REPLACE FUNCTION public.schema_version() RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+AS $$ SELECT version_num FROM public.alembic_version LIMIT 1 $$;
+REVOKE ALL ON FUNCTION public.schema_version() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.schema_version() TO :"app_role", :"api_role";
 
 -- Event trigger (exige superusuario). Protege os triggers append-only (`*_append_only`, `*_no_truncate`) e
 -- `forbid_modification()`, inclusive de quem e dono:

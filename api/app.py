@@ -30,6 +30,7 @@ from api.services.realtime import RealtimeHub
 from engine.infrastructure.config.logging import configure_logging
 from engine.infrastructure.config.redis_auth import with_redis_password
 from engine.infrastructure.config.settings import resolve_secrets_dir
+from engine.infrastructure.persistence.schema_check import SchemaMismatchError, ensure_schema_current
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.paper_events import RedisKeys
 
@@ -166,6 +167,7 @@ def create_app(
     events: EventSource | None = None,
     launcher: RunnerLauncher | None = None,
     background: bool = True,
+    verify_schema: bool = False,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -174,6 +176,12 @@ def create_app(
             if database_url is None:
                 raise RuntimeError("database_url ou sessions e obrigatorio")
             engine = create_engine(database_url)
+            if verify_schema:
+                try:
+                    await ensure_schema_current(engine)
+                except SchemaMismatchError:
+                    await engine.dispose()
+                    raise
             app.state.container = build_container(
                 settings,
                 create_session_factory(engine),
@@ -254,4 +262,8 @@ def create_default_app() -> FastAPI:
     engine_settings = load_settings()
     if settings.redis_url is None:
         settings = settings.model_copy(update={"redis_url": engine_settings.redis_url})
-    return create_app(settings, database_url=api_database_url(settings, engine_settings.database_url))
+    return create_app(
+        settings,
+        database_url=api_database_url(settings, engine_settings.database_url),
+        verify_schema=not settings.skip_schema_check,
+    )

@@ -8,9 +8,10 @@ from typing import Final
 import structlog
 
 from api.container import Container
-from api.schemas_control import LIVE_PHRASE, LIVE_UNAVAILABLE
+from api.schemas_control import LIVE_UNAVAILABLE
 from api.schemas_trading import GateCriterionOut, LiveEligibilityOut, LiveGateOut
 from api.services.fmt import number, pct
+from engine.application.live_authorization import LIVE_PHRASE
 from engine.application.paper_metrics import (
     LiveGateReport,
     LiveGateThresholds,

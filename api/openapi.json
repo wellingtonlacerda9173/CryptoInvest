@@ -3475,7 +3475,7 @@
         "type": "object"
       },
       "LiveActivationRequest": {
-        "description": "Aceita qualquer corpo: nesta fase a resposta é sempre 409 e o modo nunca muda.",
+        "description": "Pedido de AUTORIZACAO do Live. Todos os campos sao opcionais: o servidor lista o que faltar (409).",
         "properties": {
           "code": {
             "anyOf": [
@@ -3487,7 +3487,42 @@
                 "type": "null"
               }
             ],
+            "description": "Ignorado (legado)",
             "title": "Code"
+          },
+          "confirm_real_money": {
+            "default": false,
+            "description": "Confirmacao explicita do dinheiro real",
+            "title": "Confirm Real Money",
+            "type": "boolean"
+          },
+          "credential_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chave; padrao: a mais recente",
+            "title": "Credential Id"
+          },
+          "initial_capital_quote": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Capital inicial reduzido do Live, na moeda de cotacao",
+            "title": "Initial Capital Quote"
           },
           "phrase": {
             "anyOf": [
@@ -3499,11 +3534,193 @@
                 "type": "null"
               }
             ],
-            "description": "Frase fixa: OPERAR COM DINHEIRO REAL",
+            "description": "Frase exata: OPERAR COM DINHEIRO REAL",
             "title": "Phrase"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 280,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Motivo da ativacao",
+            "title": "Reason"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
           }
         },
         "title": "LiveActivationRequest",
+        "type": "object"
+      },
+      "LiveAuthorizationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "criteria": {
+            "additionalProperties": true,
+            "title": "Criteria",
+            "type": "object"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "initial_capital_quote": {
+            "title": "Initial Capital Quote",
+            "type": "string"
+          },
+          "paper_run_id": {
+            "title": "Paper Run Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "record_hash": {
+            "title": "Record Hash",
+            "type": "string"
+          },
+          "revocation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocation Reason"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked By"
+          }
+        },
+        "required": [
+          "id",
+          "paper_run_id",
+          "actor",
+          "reason",
+          "initial_capital_quote",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "revoked_by",
+          "revocation_reason",
+          "active",
+          "record_hash",
+          "criteria"
+        ],
+        "title": "LiveAuthorizationOut",
+        "type": "object"
+      },
+      "LiveAuthorizationStateOut": {
+        "additionalProperties": false,
+        "description": "`live_available` segue falso: autorizar nao inicia nada (a integracao com o runner e outra etapa).",
+        "properties": {
+          "authorization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LiveAuthorizationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "days_in_live": {
+            "title": "Days In Live",
+            "type": "integer"
+          },
+          "limit_increase_allowed": {
+            "title": "Limit Increase Allowed",
+            "type": "boolean"
+          },
+          "limit_increase_days": {
+            "title": "Limit Increase Days",
+            "type": "integer"
+          },
+          "live_available": {
+            "title": "Live Available",
+            "type": "boolean"
+          },
+          "next_step": {
+            "title": "Next Step",
+            "type": "string"
+          },
+          "reduced_capital_days": {
+            "title": "Reduced Capital Days",
+            "type": "integer"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization",
+          "stage",
+          "days_in_live",
+          "limit_increase_allowed",
+          "next_step",
+          "reduced_capital_days",
+          "limit_increase_days",
+          "live_available"
+        ],
+        "title": "LiveAuthorizationStateOut",
         "type": "object"
       },
       "LiveEligibilityOut": {
@@ -3638,6 +3855,21 @@
           "first_activation_reduced_risk_days"
         ],
         "title": "LiveGateOut",
+        "type": "object"
+      },
+      "LiveRevocationRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 280,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "LiveRevocationRequest",
         "type": "object"
       },
       "LoginRequest": {
@@ -11647,7 +11879,14 @@
           "required": true
         },
         "responses": {
-          "204": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveAuthorizationOut"
+                }
+              }
+            },
             "description": "Successful Response"
           },
           "400": {
@@ -11723,7 +11962,7 @@
                 }
               }
             },
-            "description": "Live ainda não disponível (fixo nesta fase)"
+            "description": "Criterios nao atendidos: `errors` lista cada um com o motivo exato"
           },
           "422": {
             "content": {
@@ -11762,7 +12001,280 @@
             "csrfToken": []
           }
         ],
-        "summary": "Ativação do Live: INDISPONÍVEL nesta fase (sempre 409; nunca muda o modo)",
+        "summary": "Autoriza o Live (grava a autorizacao append-only); NAO inicia o Live nem muda o modo",
+        "tags": [
+          "control"
+        ]
+      }
+    },
+    "/live/authorization": {
+      "get": {
+        "operationId": "getLiveAuthorization",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveAuthorizationStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Autorizacao vigente do Live e a proxima etapa (capital reduzido, aumento de limites)",
+        "tags": [
+          "control"
+        ]
+      }
+    },
+    "/live/authorization/revoke": {
+      "post": {
+        "operationId": "revokeLiveAuthorization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveRevocationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveAuthorizationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "summary": "Revoga a autorizacao do Live: o runner Live para novas entradas; os stops sao preservados",
         "tags": [
           "control"
         ]

@@ -8,16 +8,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from api.audit import AuditAction, AuditResult
 from api.deps import AdminDep, AuditDep, ContainerDep, FreshAdminDep, MetaDep, UserDep
 from api.errors import PROBLEM_RESPONSES, Conflict
 from api.schemas_control import (
-    LIVE_UNAVAILABLE,
     CommandAccepted,
     CommandOut,
     CommandPage,
     EmergencyStopRequest,
     LiveActivationRequest,
+    LiveAuthorizationOut,
+    LiveAuthorizationStateOut,
+    LiveRevocationRequest,
     PauseRequest,
     PowerOut,
     PowerRequest,
@@ -27,9 +28,8 @@ from api.schemas_control import (
 )
 from api.services.commands import CommandService, operator_label
 from api.services.launcher import launch_runner
-from api.services.livegate import LiveGateService
+from api.services.live_activation import LiveActivationService
 from api.services.runner_status import RunnerSnapshot, RunnerStatusService
-from api.services.status import current_run_id
 from engine.runner.paper_control import CommandName
 
 router = APIRouter(tags=["control"], responses=PROBLEM_RESPONSES)
@@ -248,9 +248,13 @@ async def get_command(command_id: str, _: UserDep, container: ContainerDep) -> C
 @router.post(
     "/live/activate",
     operation_id="activateLive",
-    status_code=204,
-    responses={409: PROBLEM_RESPONSES[409] | {"description": "Live ainda não disponível (fixo nesta fase)"}},
-    summary="Ativação do Live: INDISPONÍVEL nesta fase (sempre 409; nunca muda o modo)",
+    status_code=201,
+    response_model=LiveAuthorizationOut,
+    responses={
+        409: PROBLEM_RESPONSES[409]
+        | {"description": "Criterios nao atendidos: `errors` lista cada um com o motivo exato"}
+    },
+    summary="Autoriza o Live (grava a autorizacao append-only); NAO inicia o Live nem muda o modo",
 )
 async def activate_live(
     body: LiveActivationRequest,
@@ -258,19 +262,35 @@ async def activate_live(
     container: ContainerDep,
     audit: AuditDep,
     meta: MetaDep,
-) -> None:
-    evaluation = await LiveGateService(container).evaluate(await current_run_id(container))
-    await audit.record(
-        actor=principal.username,
-        action=AuditAction.LIVE_ACTIVATION_REFUSED,
-        target="live:activation",
-        result=AuditResult.DENIED,
-        meta=meta,
-        details={
-            "reason": LIVE_UNAVAILABLE,
-            "gate_approved": evaluation.report.approved,
-            "eligible_for_live": evaluation.eligible,
-            "phrase_sent": body.phrase is not None,
-        },
+) -> LiveAuthorizationOut:
+    return await LiveActivationService(container, audit).activate(principal=principal, body=body, meta=meta)
+
+
+@router.post(
+    "/live/authorization/revoke",
+    operation_id="revokeLiveAuthorization",
+    response_model=LiveAuthorizationOut,
+    summary="Revoga a autorizacao do Live: o runner Live para novas entradas; os stops sao preservados",
+)
+async def revoke_live_authorization(
+    body: LiveRevocationRequest,
+    principal: FreshAdminDep,
+    container: ContainerDep,
+    audit: AuditDep,
+    meta: MetaDep,
+) -> LiveAuthorizationOut:
+    return await LiveActivationService(container, audit).revoke(
+        principal=principal, reason=body.reason, meta=meta
     )
-    raise Conflict(LIVE_UNAVAILABLE)
+
+
+@router.get(
+    "/live/authorization",
+    operation_id="getLiveAuthorization",
+    response_model=LiveAuthorizationStateOut,
+    summary="Autorizacao vigente do Live e a proxima etapa (capital reduzido, aumento de limites)",
+)
+async def get_live_authorization(
+    _: UserDep, container: ContainerDep, audit: AuditDep
+) -> LiveAuthorizationStateOut:
+    return await LiveActivationService(container, audit).state()

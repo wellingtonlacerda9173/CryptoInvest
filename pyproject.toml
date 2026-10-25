@@ -39,6 +39,7 @@ dev = [
     "pandas-stubs==3.0.5.260914",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
+    "pyyaml==6.0.3",
     "ruff==0.17.1",
 ]
 
@@ -59,6 +60,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 "tests/**" = ["S101", "S608", "PT012", "PT018"]
 "tests/*/api/**" = ["E501", "S101", "S105", "S106", "S608", "PT012", "PT018", "F401", "F811"]
 "tests/api_support.py" = ["S105"]
+"tests/deploy/**" = ["E501", "S108", "S603", "S607", "S105", "S106"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -74,8 +76,10 @@ pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not docker'"
 markers = [
     "integration: requer rede e/ou banco de dados (pulavel se indisponivel)",
     "slow: calibracao estatistica com muitos sorteios (dezenas de segundos)",
+    "deploy: validacao estatica de Dockerfiles, stack, .dockerignore e scripts (sem rede e sem Docker)",
+    "docker: build e smoke das imagens (requer Docker; pulavel se indisponivel)",
 ]

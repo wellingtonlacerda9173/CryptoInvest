@@ -1,0 +1,50 @@
+# Segredos e configuracao local: nunca entram em imagem
+.env
+.env.*
+**/.env
+**/.env.*
+secrets/
+**/secrets/
+*.pem
+*.key
+*.crt
+
+# Dados e relatorios locais
+data/
+reports/
+backups/
+
+# Controle de versao e caches
+.git
+.gitignore
+.gitattributes
+.hypothesis
+**/.hypothesis
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.idea
+.vscode
+.claude
+
+# Frontend: dependencias e artefatos sao refeitos na build
+node_modules
+**/node_modules
+web/dist
+web/test-results
+web/playwright-report
+web/e2e
+web/e2e-real
+web/coverage
+
+# Testes, documentacao e ferramentas locais
+tests/
+docs/
+scripts/dev.ps1
+scripts/init-dev.ps1
+docker-compose.dev.yml
+**/Dockerfile*
+**/.dockerignore

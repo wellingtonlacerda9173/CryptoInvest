@@ -1,0 +1,359 @@
+# CryptoInvest em Docker Swarm (modo PAPER; o Live segue bloqueado: ver docs/deploy.md).
+#   export CRYPTOINVEST_TAG=0.1.0 PANEL_DOMAIN=painel.exemplo.com
+#   docker stack deploy --with-registry-auth -c deploy/stack.yml -c deploy/stack.http.yml cryptoinvest
+# Sem .env e sem segredo aqui: variaveis abaixo sao so configuracao; senhas e chaves sao Docker secrets EXTERNOS
+# (deploy/secrets.sh|ps1). Variaveis: CRYPTOINVEST_TAG e PANEL_DOMAIN (obrigatorias; TRUSTED_LB_CIDR tambem, com stack.http.yml), REGISTRY, SECRET_PREFIX,
+# RUNNER_RUN_ID, LOG_LEVEL, PAPER_WS_URL. Overrides: UM entre deploy/stack.http.yml (HTTP atras de
+# terminador TLS) e deploy/stack.tls.yml (HTTPS no proprio proxy); opcional deploy/stack.ai.yml (analista de IA).
+version: "3.9"
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.30.2-pg17@sha256:b346edcdb51a1fd6020e3965e0bd1c9f3406fa6d5fbce1e28f4852587ef934e2
+    environment:
+      POSTGRES_DB: cryptoinvest
+      POSTGRES_USER: cryptoinvest
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    # Sem root e sem capabilities (validado: sobe e aceita conexao com `docker run --user 70:70 --cap-drop ALL
+    # --read-only`; o entrypoint so precisa de caps para trocar de usuario, o que deixa de ocorrer). O Swarm nao
+    # permite uid/gid no tmpfs: o tmpfs do socket nasce com modo 1777 (padrao do kernel) e basta ao uid 70. Dono do volume de dados: ver docs/deploy.md.
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    secrets:
+      - source: postgres_password
+        target: postgres_password
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+      - type: tmpfs
+        target: /var/run/postgresql
+        tmpfs: {size: 1048576}
+    networks: [backend]
+    stop_grace_period: 120s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cryptoinvest -d cryptoinvest"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.cryptoinvest == primary]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        window: 120s
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+        monitor: 60s
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits: {cpus: "2.0", memory: 2G}
+        reservations: {cpus: "0.25", memory: 512M}
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+    # A senha vai para um arquivo de configuracao em tmpfs (nunca em argv). Persistencia AOF: os nonces dos
+    # comandos assinados precisam sobreviver a reinicio (anti-replay).
+    entrypoint:
+      - sh
+      - -c
+      - |
+        umask 077
+        printf 'requirepass %s\n' "$$(cat /run/secrets/redis_password)" > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf --appendonly yes --appendfsync everysec --dir /data --protected-mode yes
+    user: "999:1000"
+    read_only: true
+    cap_drop: [ALL]
+    secrets:
+      - source: redis_password
+        target: redis_password
+    volumes:
+      - redis-data:/data
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 8388608}
+    networks: [backend]
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.cryptoinvest == primary]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        window: 60s
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits: {cpus: "0.5", memory: 256M}
+        reservations: {memory: 64M}
+
+  migrate:
+    image: ${REGISTRY:-cryptoinvest}/migrate:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    environment:
+      DATABASE_HOST: timescaledb
+      DATABASE_NAME: cryptoinvest
+      DATABASE_SUPERUSER: cryptoinvest
+    secrets:
+      - {source: postgres_password, target: postgres_password, uid: "10001", gid: "10001", mode: 0400}
+      - {source: migrator_password, target: migrator_password, uid: "10001", gid: "10001", mode: 0400}
+      - {source: app_password, target: app_password, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_database_password, target: api_database_password, uid: "10001", gid: "10001", mode: 0400}
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 16777216}
+    networks: [backend]
+    deploy:
+      mode: replicated-job
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits: {cpus: "1.0", memory: 512M}
+
+  api:
+    image: ${REGISTRY:-cryptoinvest}/api:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    environment:
+      ENVIRONMENT: prod
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_HOST: timescaledb
+      DATABASE_USER: cryptoinvest_app
+      REDIS_URL: redis://redis:6379/0
+      API_ENVIRONMENT: prod
+      API_DATABASE_USER: cryptoinvest_api
+      API_PANEL_ORIGINS: '["https://${PANEL_DOMAIN:?defina PANEL_DOMAIN}"]'
+      API_COOKIE_SECURE: "true"
+      API_HSTS_MAX_AGE_SECONDS: "31536000"
+      API_TRUST_FORWARDED_FOR: "true"
+      API_TRUSTED_PROXIES: '["10.77.1.0/24"]'
+      API_RECOVERY_ACCEPT_LEGACY_HASHES: "false"
+      API_RUNNER_DATA_DIR: /var/lib/cryptoinvest/paper
+      API_BACKTEST_CACHE_DIR: /var/lib/cryptoinvest/cache
+      API_BACKTEST_MAX_MEMORY_MB: "1024"
+    secrets:
+      - {source: app_password, target: database_password, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_database_password, target: api_database_password, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_session_secret, target: api_session_secret, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_master_keys, target: api_master_keys, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_recovery_hmac_key, target: api_recovery_hmac_key, uid: "10001", gid: "10001", mode: 0400}
+      - {source: command_hmac_key, target: command_hmac_key, uid: "10001", gid: "10001", mode: 0400}
+      - {source: redis_password, target: redis_password, uid: "10001", gid: "10001", mode: 0400}
+    volumes:
+      - paper-data:/var/lib/cryptoinvest/paper
+      - api-cache:/var/lib/cryptoinvest/cache
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+    networks: [backend, edge, egress]
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "api"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.cryptoinvest == primary]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        window: 120s
+      update_config:
+        parallelism: 1
+        order: stop-first
+        delay: 10s
+        failure_action: rollback
+        monitor: 45s
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits: {cpus: "1.5", memory: 2G}
+        reservations: {cpus: "0.25", memory: 256M}
+
+  runner:
+    image: ${REGISTRY:-cryptoinvest}/runner:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
+    # Run estavel: reiniciar com o MESMO --run-id recupera posicoes, stops, risco e halt.
+    command: ["python", "-m", "engine.runner.paper", "start", "--run-id", "${RUNNER_RUN_ID:-paper-main}", "--data-dir", "/var/lib/cryptoinvest/paper", "--json-logs"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    stop_signal: SIGTERM
+    # Parada ordenada: o runner encerra preservando os stops das posicoes abertas; so entao o Swarm envia SIGKILL.
+    stop_grace_period: 120s
+    environment:
+      ENVIRONMENT: prod
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_HOST: timescaledb
+      DATABASE_USER: cryptoinvest_app
+      REDIS_URL: redis://redis:6379/0
+      PAPER_WS_URL: ${PAPER_WS_URL:-wss://stream.binance.com:443}
+    secrets:
+      - {source: app_password, target: database_password, uid: "10001", gid: "10001", mode: 0400}
+      - {source: command_hmac_key, target: command_hmac_key, uid: "10001", gid: "10001", mode: 0400}
+      - {source: redis_password, target: redis_password, uid: "10001", gid: "10001", mode: 0400}
+    volumes:
+      - paper-data:/var/lib/cryptoinvest/paper
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 67108864}
+    networks: [backend, egress]
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py", "runner"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    deploy:
+      # UMA replica e stop-first: NUNCA dois runners no mesmo run (o lock de arquivo e o advisory lock
+      # no banco recusariam o segundo, mas a regra aqui evita sequer a tentativa).
+      replicas: 1
+      placement:
+        constraints: [node.labels.cryptoinvest == primary]
+        max_replicas_per_node: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        window: 120s
+      update_config:
+        parallelism: 1
+        order: stop-first
+        delay: 10s
+        failure_action: rollback
+        monitor: 120s
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits: {cpus: "1.0", memory: 1G}
+        reservations: {cpus: "0.25", memory: 256M}
+
+  web:
+    image: ${REGISTRY:-cryptoinvest}/web:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    environment:
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?defina PANEL_DOMAIN}
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs: {size: 33554432}
+    # Portas publicadas no override escolhido: deploy/stack.http.yml (atras de terminador TLS) ou deploy/stack.tls.yml.
+    networks: [frontend, edge]
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.cryptoinvest == primary]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        window: 60s
+      update_config:
+        parallelism: 1
+        order: stop-first
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits: {cpus: "0.5", memory: 128M}
+        reservations: {memory: 32M}
+
+networks:
+  # banco e Redis: rede interna (sem rota para fora), trafego cifrado entre nos
+  backend:
+    driver: overlay
+    internal: true
+    driver_opts:
+      encrypted: "true"
+  # api <-> proxy: subnet fixa para API_TRUSTED_PROXIES
+  edge:
+    driver: overlay
+    internal: true
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: 10.77.1.0/24
+  # so saida para a Binance/Anthropic (runner e api); nenhum servico escuta nela
+  egress:
+    driver: overlay
+  # so o proxy
+  frontend:
+    driver: overlay
+
+volumes:
+  timescale-data:
+  redis-data:
+  paper-data:
+  api-cache:
+
+secrets:
+  postgres_password:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_postgres_password
+  migrator_password:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_migrator_password
+  app_password:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_app_password
+  api_database_password:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_api_database_password
+  redis_password:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_redis_password
+  api_session_secret:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_api_session_secret
+  api_master_keys:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_api_master_keys
+  api_recovery_hmac_key:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_api_recovery_hmac_key
+  command_hmac_key:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_command_hmac_key
+  # Opcionais (stack.ai.yml / Live futuro, 7B): NAO definidos aqui. Chaves da Binance ficam vazias no paper.

@@ -57,6 +57,9 @@ class _FakeBinance(BaseHTTPRequestHandler):
                 "enableReading": True,
                 "enableSpotAndMarginTrading": True,
                 "enableWithdrawals": False,
+                "enableInternalTransfer": False,
+                "enableMargin": False,
+                "enableFutures": False,
                 "ipRestrict": True,
             }
         ).encode()  # fmt: skip

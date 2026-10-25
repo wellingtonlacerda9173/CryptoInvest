@@ -35,6 +35,7 @@ from engine.infrastructure.paper import SystemClock
 from engine.infrastructure.persistence.ai_call_repository import SqlAiCallStore
 from engine.infrastructure.persistence.lesson_repository import SqlLessonStore
 from engine.infrastructure.persistence.recovery import load_recovery_state
+from engine.infrastructure.persistence.schema_check import SchemaMismatchError, ensure_schema_current
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.backtest import STRATEGY_NAMES, build_strategies, git_version, parse_values
 from engine.runner.command_channel import (
@@ -129,6 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="amostras de backtest importadas no recalculo (geradas por validate --publish-scores)",
     )
     start.add_argument("--no-redis", action="store_true")
+    start.add_argument(
+        "--skip-schema-check",
+        action="store_true",
+        help="DEV: nao compara alembic_version com o head do codigo (producao recusa a flag)",
+    )
     start.add_argument(
         "--no-versioned-config",
         action="store_true",
@@ -246,6 +252,20 @@ async def run_start(args: argparse.Namespace) -> int:
     version = f"{sha[:12] if sha else 'desconhecida'}{'+dirty' if dirty else ''}"
     db_engine = create_engine(settings.database_url)
     sessions = create_session_factory(db_engine)
+    if args.skip_schema_check and settings.environment == "prod":
+        print("erro: --skip-schema-check nao e permitido em producao", file=sys.stderr)
+        instance.release()
+        await db_engine.dispose()
+        return EXIT_USAGE
+    if not args.skip_schema_check:
+        try:
+            await ensure_schema_current(db_engine)
+        except SchemaMismatchError as error:
+            log.critical("schema_mismatch", error=str(error))
+            print(f"erro: {error}", file=sys.stderr)
+            instance.release()
+            await db_engine.dispose()
+            return EXIT_FATAL
     redis_url = with_redis_password(settings.redis_url, resolve_secrets_dir())
     signing_key = load_command_key(resolve_secrets_dir())
     bus: EventBus = NullEventBus() if args.no_redis else RedisEventBus(redis_url, signing_key=signing_key)

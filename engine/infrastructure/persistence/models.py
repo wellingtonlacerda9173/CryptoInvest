@@ -496,3 +496,53 @@ class BacktestJobRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+LIVE_PHRASE_CHECK = "confirmed_phrase = 'OPERAR COM DINHEIRO REAL'"
+
+
+class LiveAuthorizationRow(Base):
+    """Autorizacao do Live, append-only: so existe se TODOS os criterios valiam no servidor. Nao inicia nada.
+
+    O hash cobre todos os campos; a revogacao e uma linha em `live_authorization_revocations`.
+    """
+
+    __tablename__ = "live_authorizations"
+    __table_args__ = (
+        CheckConstraint(LIVE_PHRASE_CHECK, name="ck_live_authorizations_phrase"),
+        CheckConstraint("expires_at > created_at", name="ck_live_authorizations_expiry"),
+        CheckConstraint("initial_capital_quote > 0", name="ck_live_authorizations_capital"),
+        CheckConstraint("length(btrim(reason)) >= 3", name="ck_live_authorizations_reason"),
+        Index("ix_live_authorizations_created", text("created_at DESC"), "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    paper_run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"))
+    criteria: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    actor: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text)
+    confirmed_phrase: Mapped[str] = mapped_column(String(64))
+    initial_capital_quote: Mapped[Decimal] = mapped_column(Numeric(28, 10))
+    credential_id: Mapped[str] = mapped_column(String(36))
+    key_permissions: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    record_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LiveAuthorizationRevocationRow(Base):
+    """Revogacao (append-only, uma por autorizacao): o runner live para novas entradas; stops preservados."""
+
+    __tablename__ = "live_authorization_revocations"
+    __table_args__ = (
+        CheckConstraint("length(btrim(reason)) >= 3", name="ck_live_authorization_revocations_reason"),
+        UniqueConstraint("authorization_id", name="uq_live_authorization_revocations_authorization"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    authorization_id: Mapped[str] = mapped_column(ForeignKey("live_authorizations.id"))
+    actor: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,4 +1,5 @@
 import ipaddress
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -15,8 +16,16 @@ from engine.runner.command_channel import load_command_key
 log = structlog.get_logger()
 
 _SECRET_FIELDS = frozenset(
-    {"session_secret", "master_keys", "command_hmac_key", "recovery_hmac_key", "database_password"}
+    {
+        "session_secret",
+        "master_keys",
+        "command_hmac_key",
+        "recovery_hmac_key",
+        "live_authorization_hmac_key",
+        "database_password",
+    }
 )
+MAX_LIVE_INITIAL_CAPITAL_CAP = Decimal(100)
 ENV_PREFIX = "API_"
 
 
@@ -56,6 +65,7 @@ class ApiSettings(BaseSettings):
     trusted_proxies: list[str] = []
     hsts_max_age_seconds: int = Field(default=0, ge=0)
     max_body_bytes: int = Field(default=64 * 1024, ge=1024, le=10 * 1024 * 1024)
+    skip_schema_check: bool = False
 
     session_idle_minutes: int = Field(default=30, ge=1)
     session_absolute_hours: int = Field(default=12, ge=1)
@@ -87,6 +97,13 @@ class ApiSettings(BaseSettings):
     database_password: SecretStr | None = None
 
     binance_api_origin: str = "https://api.binance.com"
+
+    # Trava do Live (`POST /live/activate`): so grava uma AUTORIZACAO; nada liga o Live nesta versao
+    live_initial_capital_cap_quote: Decimal = Field(default=MAX_LIVE_INITIAL_CAPITAL_CAP, gt=0)
+    live_authorization_hours: int = Field(default=24, ge=1, le=168)
+    live_key_max_age_hours: int = Field(default=24, ge=1, le=168)
+    live_require_ip_restriction: bool = True
+    live_block_on_key_warnings: bool = True
     binance_verify_timeout_seconds: float = Field(default=10.0, gt=0)
 
     # Canal Redis do runner (comandos assinados, estado e eventos em tempo real)
@@ -122,6 +139,9 @@ class ApiSettings(BaseSettings):
     # Segredo proprio do HMAC dos codigos de recuperacao (arquivo `api_recovery_hmac_key`); sem ele cai no
     # session_secret (legado). Trocar o valor invalida os codigos gerados com o anterior.
     recovery_hmac_key: SecretStr | None = None
+    # HMAC do `record_hash` das autorizacoes do Live (arquivo `api_live_authorization_hmac_key`); sem ele cai
+    # na `command_hmac_key`. Sem nenhuma das duas a autorizacao NAO e gravada.
+    live_authorization_hmac_key: SecretStr | None = None
 
     @field_validator("panel_origins")
     @classmethod
@@ -151,7 +171,7 @@ class ApiSettings(BaseSettings):
                 raise ValueError(f"proxy confiavel invalido (use IP ou CIDR): {item!r}") from None
         return proxies
 
-    @field_validator("command_hmac_key", "recovery_hmac_key")
+    @field_validator("command_hmac_key", "recovery_hmac_key", "live_authorization_hmac_key")
     @classmethod
     def _long_hmac_key(cls, value: SecretStr | None, info: ValidationInfo) -> SecretStr | None:
         if value is None:
@@ -171,6 +191,18 @@ class ApiSettings(BaseSettings):
     @model_validator(mode="after")
     def _production_guards(self) -> "ApiSettings":
         if self.environment == "prod":
+            if not self.live_require_ip_restriction or not self.live_block_on_key_warnings:
+                raise ValueError(
+                    "producao nao permite relaxar a trava do Live (live_require_ip_restriction e "
+                    "live_block_on_key_warnings precisam ser true)"
+                )
+            if self.live_initial_capital_cap_quote > MAX_LIVE_INITIAL_CAPITAL_CAP:
+                raise ValueError(
+                    "producao nao permite teto de capital inicial do Live acima de "
+                    f"{MAX_LIVE_INITIAL_CAPITAL_CAP}"
+                )
+            if self.skip_schema_check:
+                raise ValueError("producao nao permite skip_schema_check (--skip-schema-check e so para dev)")
             if not self.cookie_secure:
                 raise ValueError("producao exige cookie_secure=true")
             if any(not o.startswith("https://") for o in self.panel_origins):

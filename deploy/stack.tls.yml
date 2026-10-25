@@ -1,0 +1,27 @@
+# HTTPS no proprio proxy: crie os secrets cryptoinvest_tls_cert (cadeia PEM) e cryptoinvest_tls_key (chave PEM) e rode
+#   docker stack deploy -c deploy/stack.yml -c deploy/stack.tls.yml cryptoinvest
+version: "3.9"
+
+services:
+  web:
+    image: ${REGISTRY:-cryptoinvest}/web-tls:${CRYPTOINVEST_TAG:?defina CRYPTOINVEST_TAG}
+    secrets:
+      - {source: tls_cert, target: tls_cert, uid: "101", gid: "101", mode: 0400}
+      - {source: tls_key, target: tls_key, uid: "101", gid: "101", mode: 0400}
+    ports:
+      - target: 8080
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 8443
+        published: 443
+        protocol: tcp
+        mode: host
+
+secrets:
+  tls_cert:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_tls_cert
+  tls_key:
+    external: true
+    name: ${SECRET_PREFIX:-cryptoinvest}_tls_key

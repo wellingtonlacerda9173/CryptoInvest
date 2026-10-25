@@ -35,7 +35,8 @@ Contrato: `uv run python -m api.export_openapi` regrava `api/openapi.json`; um t
 | credentials | `GET /credentials`, `POST` / `PUT /{id}` / `DELETE /{id}` (reauth recente), `POST /{id}/verify` | admin |
 | trading | `GET /status`, `/risk/limits`, `/account/summary`, `/equity`, `/positions`, `/trades` (+ `/trades/export` CSV), `/decisions`, `/performance`, `/live-gate`, `/market/candles`, `/glossary` | admin e leitor |
 | control | `POST /control/pause`, `/resume`, `/stop`, `/emergency-stop`, `/power` | admin |
-| control | `POST /control/reactivate` (reauth recente), `POST /live/activate` (reauth recente; **sempre 409**) | admin |
+| control | `POST /control/reactivate` (reauth recente), `POST /live/activate` e `POST /live/authorization/revoke` (reauth recente; so gravam/revogam a AUTORIZACAO, nunca ligam o Live) | admin |
+| control | `GET /live/authorization` (autorizacao vigente e proxima etapa: capital reduzido 7 dias, aumento de limites so apos 30 dias no Live dentro das metas) | admin e leitor |
 | control | `GET /control/commands`, `GET /control/commands/{id}` (estado de entrega) | admin e leitor |
 | settings | `GET /settings`, `GET /settings/history` | admin e leitor |
 | settings | `POST /settings/validate` (nao salva), `PUT /settings/{pairs\|strategies\|risk\|ai}` (reauth recente) | admin |
@@ -62,8 +63,32 @@ falham para rota sem autorizacao explicita.
   (`API_RUNNER_DATA_DIR`) e o diario como reservas. Motivos de decisao e glossario em pt-BR: `api/reasons.py`.
 - Listas por cursor (`next_cursor`), totais sempre de UM modo (paper/live nunca se misturam).
 - Trava do Live (`GET /live-gate`): criterios valor x meta (`met`/`failed`/`in_progress`), `eligible_for_live`
-  (calendario aberto = inelegivel para sempre). `POST /live/activate` responde **409 "Live ainda nao disponivel"** e nunca muda o
-  modo (Fase 7); a tentativa e auditada (`live.activation.refused`).
+  (calendario aberto = inelegivel para sempre).
+- Autorizacao do Live (`POST /live/activate`, Fase 7B): **nao inicia nada**. Grava uma linha append-only em
+  `live_authorizations` (migracao 0015; revogacao em `live_authorization_revocations`; API INSERT/SELECT, robo SELECT)
+  SOMENTE se TODAS as condicoes valem no servidor: run de Paper elegivel (sem calendario aberto) com >= 60 dias,
+  drawdown < 5%, profit factor > 1,5, >= 30 operacoes e >= 5 perdas, nenhum dia acima do limite diario de perda;
+  admin com reauth recente + CSRF; frase EXATA `OPERAR COM DINHEIRO REAL` (sem normalizacao; tambem CHECK no banco);
+  `confirm_real_money: true`; `initial_capital_quote` <= `API_LIVE_INITIAL_CAPITAL_CAP_QUOTE` (padrao 100); chave da
+  Binance RE-verificada agora, sem saque, com restricao de IP e (padrao) sem transferencia/margem/futuros
+  (`API_LIVE_REQUIRE_IP_RESTRICTION`, `API_LIVE_BLOCK_ON_KEY_WARNINGS`); nenhum run Live ativo nem autorizacao
+  ativa. Recusa: **409** com `errors[]` (um item por criterio, `code` + motivo) e auditoria `live.activation.refused`
+  com os mesmos criterios. Sucesso: **201** + auditoria `live.authorization.granted` (expira em
+  `API_LIVE_AUTHORIZATION_HOURS`, padrao 24). `POST /live/authorization/revoke` (admin, reauth) revoga: o runner Live
+  para novas entradas no proximo ciclo e os stops sao preservados. `GET /live/authorization` mostra a etapa
+  (`reduced_capital` 7 dias; `limit_increase_allowed` so apos 30 dias no Live com drawdown < 5%, perda diaria
+  dentro do limite e resultado >= 0). `/status` continua com `live_available=false` e o modo `paper`.
+  Endurecimentos (revisao QA 7B-1, 2a rodada): a perda diaria usa um PISO FIXO de 1% (`MAX_DAILY_LOSS`) alem do limite
+  do run (um Paper com `max_daily_loss=5%` e dia de -3% NAO libera); `record_hash` e um HMAC-SHA256 com sub-chave por
+  dominio, chave de arquivo secreto `api_live_authorization_hmac_key` (ou `command_hmac_key` como reserva; sem
+  nenhuma das duas a ativacao e recusada) e a API reverifica o MAC ao ler: registro adulterado => autorizacao inativa
+  (`live_authorization_mac_invalid` no log); o runner Live deve reverificar com
+  `engine.application.live_authorization.authorization_mac_valid`. `credential_id` fica SEM chave estrangeira de
+  proposito (decisao): a tabela e append-only/auditavel e a chave pode ser rotacionada/removida sem reescrever o
+  historico; ele e coberto pelo MAC (qualquer troca invalida o registro) e existe/e re-verificado na ativacao (por
+  isso nao ha migracao 0016). Em producao `API_LIVE_REQUIRE_IP_RESTRICTION=false`,
+  `API_LIVE_BLOCK_ON_KEY_WARNINGS=false` ou teto de capital inicial acima de 100 impedem a API de subir. Flags
+  `enableMargin`/`enableInternalTransfer` AUSENTES na resposta da Binance contam como inseguras (falha fechada).
 
 ### Comandos ao robo (`api/services/commands.py`, `engine/runner/command_channel.py`)
 
