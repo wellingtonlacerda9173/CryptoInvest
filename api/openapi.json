@@ -172,6 +172,280 @@
         "title": "ActivationOut",
         "type": "object"
       },
+      "AiUsageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "budget_stops": {
+            "description": "Pedidos não enviados por orçamento ou limite por hora.",
+            "title": "Budget Stops",
+            "type": "integer"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Teto mensal da última configuração salva.",
+            "title": "Budget Usd"
+          },
+          "by_result": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Result",
+            "type": "object"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "calls_last_hour": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls Last Hour"
+          },
+          "circuit_open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Circuit Open"
+          },
+          "failures": {
+            "description": "Chamadas com resposta inválida, atraso ou erro.",
+            "title": "Failures",
+            "type": "integer"
+          },
+          "month_start": {
+            "format": "date-time",
+            "title": "Month Start",
+            "type": "string"
+          },
+          "runner_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ex.: 'ligada', 'desligada', 'sem chave: IA desligada'.",
+            "title": "Runner Status"
+          },
+          "spent_usd": {
+            "description": "Gasto estimado da IA no mês corrente (UTC).",
+            "title": "Spent Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "month_start",
+          "spent_usd",
+          "budget_usd",
+          "calls",
+          "failures",
+          "budget_stops",
+          "by_result",
+          "runner_status",
+          "circuit_open",
+          "calls_last_hour"
+        ],
+        "title": "AiUsageOut",
+        "type": "object"
+      },
+      "AiValueOut": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_loss_pnl": {
+            "title": "Approved Loss Pnl",
+            "type": "number"
+          },
+          "approved_losses": {
+            "title": "Approved Losses",
+            "type": "integer"
+          },
+          "approved_pnl": {
+            "title": "Approved Pnl",
+            "type": "number"
+          },
+          "approved_total_r": {
+            "title": "Approved Total R",
+            "type": "number"
+          },
+          "approved_trades": {
+            "title": "Approved Trades",
+            "type": "integer"
+          },
+          "approved_wins": {
+            "title": "Approved Wins",
+            "type": "integer"
+          },
+          "avoided_loss": {
+            "description": "Perdas que os vetos teriam causado (simulação).",
+            "title": "Avoided Loss",
+            "type": "number"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/VetoCaseOut"
+            },
+            "title": "Cases",
+            "type": "array"
+          },
+          "correct_vetoes": {
+            "title": "Correct Vetoes",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "failed_calls": {
+            "title": "Failed Calls",
+            "type": "integer"
+          },
+          "false_veto_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "False Veto Rate"
+          },
+          "false_vetoes": {
+            "title": "False Vetoes",
+            "type": "integer"
+          },
+          "mean_r_vetoed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean R Vetoed"
+          },
+          "missed_gain": {
+            "description": "Ganhos que os vetos barraram (simulação).",
+            "title": "Missed Gain",
+            "type": "number"
+          },
+          "net_avoided": {
+            "title": "Net Avoided",
+            "type": "number"
+          },
+          "net_value_usd": {
+            "title": "Net Value Usd",
+            "type": "number"
+          },
+          "not_filled": {
+            "title": "Not Filled",
+            "type": "integer"
+          },
+          "not_simulated": {
+            "title": "Not Simulated",
+            "type": "integer"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "simulated": {
+            "title": "Simulated",
+            "type": "integer"
+          },
+          "small_sample": {
+            "title": "Small Sample",
+            "type": "boolean"
+          },
+          "unresolved": {
+            "title": "Unresolved",
+            "type": "integer"
+          },
+          "verdict": {
+            "enum": [
+              "no_activity",
+              "insufficient_sample",
+              "no_conclusion",
+              "ai_avoided_losses",
+              "ai_missed_gains",
+              "no_difference"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          },
+          "verdict_text": {
+            "title": "Verdict Text",
+            "type": "string"
+          },
+          "vetoes": {
+            "title": "Vetoes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period_start",
+          "period_end",
+          "calls",
+          "failed_calls",
+          "cost_usd",
+          "vetoes",
+          "simulated",
+          "not_filled",
+          "unresolved",
+          "not_simulated",
+          "avoided_loss",
+          "missed_gain",
+          "net_avoided",
+          "correct_vetoes",
+          "false_vetoes",
+          "false_veto_rate",
+          "mean_r_vetoed",
+          "approved_trades",
+          "approved_wins",
+          "approved_losses",
+          "approved_pnl",
+          "approved_loss_pnl",
+          "approved_total_r",
+          "net_value_usd",
+          "verdict",
+          "verdict_text",
+          "small_sample",
+          "cases"
+        ],
+        "title": "AiValueOut",
+        "type": "object"
+      },
       "AuditEntryOut": {
         "additionalProperties": false,
         "properties": {
@@ -2719,6 +2993,457 @@
         "title": "KeyPermissions",
         "type": "object"
       },
+      "LessonDetailOut": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationOut"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "source": {
+            "description": "'ai' (texto do modelo) ou 'deterministic' (só estatísticas).",
+            "enum": [
+              "ai",
+              "deterministic"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/LessonStatsOut"
+          },
+          "status": {
+            "description": "Só 'approved' entra como contexto de leitura da IA.",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "period_start",
+          "period_end",
+          "source",
+          "model",
+          "prompt_version",
+          "status",
+          "reviewer",
+          "review_reason",
+          "reviewed_at",
+          "summary",
+          "observations",
+          "stats"
+        ],
+        "title": "LessonDetailOut",
+        "type": "object"
+      },
+      "LessonGroupOut": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "loss_r": {
+            "title": "Loss R",
+            "type": "number"
+          },
+          "losses": {
+            "title": "Losses",
+            "type": "integer"
+          },
+          "max_drawdown_r": {
+            "title": "Max Drawdown R",
+            "type": "number"
+          },
+          "mean_r": {
+            "title": "Mean R",
+            "type": "number"
+          },
+          "total_r": {
+            "title": "Total R",
+            "type": "number"
+          },
+          "trades": {
+            "title": "Trades",
+            "type": "integer"
+          },
+          "wins": {
+            "title": "Wins",
+            "type": "integer"
+          },
+          "worst_r": {
+            "title": "Worst R",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "trades",
+          "wins",
+          "losses",
+          "total_r",
+          "mean_r",
+          "loss_r",
+          "worst_r",
+          "max_drawdown_r"
+        ],
+        "title": "LessonGroupOut",
+        "type": "object"
+      },
+      "LessonOut": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationOut"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "source": {
+            "description": "'ai' (texto do modelo) ou 'deterministic' (só estatísticas).",
+            "enum": [
+              "ai",
+              "deterministic"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "description": "Só 'approved' entra como contexto de leitura da IA.",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "period_start",
+          "period_end",
+          "source",
+          "model",
+          "prompt_version",
+          "status",
+          "reviewer",
+          "review_reason",
+          "reviewed_at",
+          "summary",
+          "observations"
+        ],
+        "title": "LessonOut",
+        "type": "object"
+      },
+      "LessonPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LessonPage",
+        "type": "object"
+      },
+      "LessonReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Por que aprova ou rejeita (obrigatório).",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ],
+        "title": "LessonReviewRequest",
+        "type": "object"
+      },
+      "LessonRunOut": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "state": {
+            "const": "started",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "message"
+        ],
+        "title": "LessonRunOut",
+        "type": "object"
+      },
+      "LessonStatsOut": {
+        "additionalProperties": false,
+        "properties": {
+          "by_regime": {
+            "items": {
+              "$ref": "#/components/schemas/LessonGroupOut"
+            },
+            "title": "By Regime",
+            "type": "array"
+          },
+          "by_strategy": {
+            "items": {
+              "$ref": "#/components/schemas/LessonGroupOut"
+            },
+            "title": "By Strategy",
+            "type": "array"
+          },
+          "by_symbol": {
+            "items": {
+              "$ref": "#/components/schemas/LessonGroupOut"
+            },
+            "title": "By Symbol",
+            "type": "array"
+          },
+          "decisions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Decisions",
+            "type": "object"
+          },
+          "loss_r": {
+            "title": "Loss R",
+            "type": "number"
+          },
+          "losses": {
+            "title": "Losses",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total_r": {
+            "title": "Total R",
+            "type": "number"
+          },
+          "trades": {
+            "title": "Trades",
+            "type": "integer"
+          },
+          "wins": {
+            "title": "Wins",
+            "type": "integer"
+          },
+          "worst_losses": {
+            "items": {
+              "$ref": "#/components/schemas/LossOut"
+            },
+            "title": "Worst Losses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "trades",
+          "wins",
+          "losses",
+          "total_r",
+          "loss_r",
+          "skipped",
+          "by_strategy",
+          "by_regime",
+          "by_symbol",
+          "worst_losses",
+          "decisions"
+        ],
+        "title": "LessonStatsOut",
+        "type": "object"
+      },
       "LevelOut": {
         "additionalProperties": false,
         "properties": {
@@ -2977,6 +3702,41 @@
         "title": "LoginStep",
         "type": "object"
       },
+      "LossOut": {
+        "additionalProperties": false,
+        "properties": {
+          "closed_on": {
+            "format": "date",
+            "title": "Closed On",
+            "type": "string"
+          },
+          "r_multiple": {
+            "title": "R Multiple",
+            "type": "number"
+          },
+          "regime": {
+            "title": "Regime",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy",
+          "symbol",
+          "regime",
+          "closed_on",
+          "r_multiple"
+        ],
+        "title": "LossOut",
+        "type": "object"
+      },
       "MarkerOut": {
         "additionalProperties": false,
         "properties": {
@@ -3086,6 +3846,36 @@
           "csrf_token"
         ],
         "title": "MeOut",
+        "type": "object"
+      },
+      "ObservationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "evidence": {
+            "description": "Números que sustentam a observação.",
+            "title": "Evidence",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "evidence",
+          "confidence"
+        ],
+        "title": "ObservationOut",
         "type": "object"
       },
       "OnboardingOut": {
@@ -5014,6 +5804,51 @@
         ],
         "title": "UserOut",
         "type": "object"
+      },
+      "VetoCaseOut": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "number"
+          },
+          "r_multiple": {
+            "title": "R Multiple",
+            "type": "number"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decided_at",
+          "code",
+          "strategy",
+          "symbol",
+          "status",
+          "pnl",
+          "r_multiple"
+        ],
+        "title": "VetoCaseOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -5166,6 +6001,877 @@
         "summary": "Saldo e resultado do dia, da semana e total",
         "tags": [
           "trading"
+        ]
+      }
+    },
+    "/ai/lessons": {
+      "get": {
+        "operationId": "listAiLessons",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Lições da IA (mais recentes primeiro) com o estado de revisão",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/ai/lessons/run": {
+      "post": {
+        "operationId": "runAiLessons",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "summary": "Gera um relatório de lições agora (em segundo plano, respeitando o orçamento)",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/ai/lessons/{lesson_id}": {
+      "get": {
+        "operationId": "getAiLesson",
+        "parameters": [
+          {
+            "description": "Id da lição",
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "description": "Id da lição",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Uma lição com observações, evidência numérica e estatísticas do período",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/ai/lessons/{lesson_id}/review": {
+      "post": {
+        "operationId": "reviewAiLesson",
+        "parameters": [
+          {
+            "description": "Id da lição",
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "description": "Id da lição",
+              "pattern": "^[0-9a-f]{32}$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "summary": "Aprova ou rejeita uma lição (admin com reautenticação; o motivo é obrigatório)",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/ai/usage": {
+      "get": {
+        "operationId": "getAiUsage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUsageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Gasto estimado da IA no mês, chamadas, falhas e estado do circuito",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/ai/value": {
+      "get": {
+        "operationId": "getAiValue",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 365,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiValueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requisicao invalida"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao autenticado"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sem permissao"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Nao encontrado"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflito"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Dados invalidos"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Muitas tentativas"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Valor da IA: o que os vetos teriam rendido, custo e um veredito honesto",
+        "tags": [
+          "ai"
         ]
       }
     },

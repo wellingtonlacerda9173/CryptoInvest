@@ -10,6 +10,7 @@ from typing import Self
 from pydantic import Field, model_validator
 
 from engine.application.selector import SelectorSettings
+from engine.application.trading_config.document import AiConfig
 from engine.domain.base import DomainModel
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Fee, StrictDecimal, Symbol, Timeframe, Volume
@@ -43,6 +44,9 @@ class PaperRunConfig(DomainModel):
     max_stop_blind_seconds: int = Field(default=30, gt=0)
     max_book_age_seconds: int = Field(default=10, gt=0)
     selector: SelectorSettings = SelectorSettings()
+    # fora da identidade do run (config_hash): a IA so reduz e acompanha a versao a cada start
+    ai: AiConfig = AiConfig()
+    ai_min_confidence: float = Field(default=0.5, ge=0, le=1)
 
     allow_open_calendar: bool = False
     history_window: int = Field(default=400, ge=60)

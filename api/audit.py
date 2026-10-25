@@ -55,6 +55,9 @@ class AuditAction(StrEnum):
     ACTIVATION_USED = "auth.activation.used"
     ACTIVATION_FAILED = "auth.activation.failed"
     LOGIN_TARGETED = "auth.login.targeted"
+    AI_LESSON_REVIEWED = "ai.lesson.reviewed"
+    AI_LESSON_RUN_REQUESTED = "ai.lesson.run_requested"
+    AI_LESSON_RUN_REFUSED = "ai.lesson.run_refused"
 
 
 class AuditResult(StrEnum):

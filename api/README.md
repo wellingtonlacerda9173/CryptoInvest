@@ -39,6 +39,8 @@ Contrato: `uv run python -m api.export_openapi` regrava `api/openapi.json`; um t
 | control | `GET /control/commands`, `GET /control/commands/{id}` (estado de entrega) | admin e leitor |
 | settings | `GET /settings`, `GET /settings/history` | admin e leitor |
 | settings | `POST /settings/validate` (nao salva), `PUT /settings/{pairs\|strategies\|risk\|ai}` (reauth recente) | admin |
+| ai | `GET /ai/usage`, `GET /ai/lessons`, `GET /ai/lessons/{id}`, `GET /ai/value` | admin e leitor |
+| ai | `POST /ai/lessons/run` (202, subprocesso, uma por vez), `POST /ai/lessons/{id}/review` (reauth recente; `approve\|reject` + motivo obrigatorio) | admin |
 | backtest | `GET /backtests`, `GET /backtests/{id}`, `GET /backtests/{id}/report` | admin e leitor |
 | backtest | `POST /backtests` (202), `POST /backtests/{id}/cancel` | admin |
 | onboarding | `GET /onboarding`; `POST /onboarding/start-paper` | leitor le; admin inicia |

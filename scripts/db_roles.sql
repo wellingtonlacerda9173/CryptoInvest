@@ -72,8 +72,10 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, :"app_role", :"api_rol
 -- imutaveis: so SELECT e INSERT
 GRANT SELECT, INSERT ON
     trades, decisions, control_events, fills, risk_state, gateway_state, audit_log, equity_snapshots,
-    strategy_scores
+    strategy_scores, ai_calls, ai_lessons
     TO :"app_role";
+-- revisoes de licoes: o robo so LE (para saber quais licoes um admin aprovou); quem grava e a API
+GRANT SELECT ON ai_lesson_reviews TO :"app_role";
 -- configuracao versionada: o robo so LE a ultima versao no start (quem grava e a API)
 GRANT SELECT ON config_versions TO :"app_role";
 
@@ -95,8 +97,10 @@ GRANT UPDATE (open, high, low, close, volume) ON candles TO :"app_role";
 -- Leitura do diario e da configuracao (nunca escrita: o diario e do robo).
 GRANT SELECT ON
     trades, decisions, control_events, fills, risk_state, gateway_state, equity_snapshots,
-    runs, orders, positions, candles, strategy_scores
+    runs, orders, positions, candles, strategy_scores, ai_calls, ai_lessons
     TO :"api_role";
+-- revisao humana de licoes: append-only (sem UPDATE/DELETE); a mais recente por licao vale
+GRANT SELECT, INSERT ON ai_lesson_reviews TO :"api_role";
 -- Auditoria e configuracao versionada: so SELECT e INSERT (append-only tambem por privilegio).
 GRANT SELECT, INSERT ON audit_log, config_versions TO :"api_role";
 -- Fila de comandos e jobs: a API cria a linha; depois so avanca o ESTADO (nunca reescreve o pedido).

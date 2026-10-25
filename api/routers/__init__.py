@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from api.routers import (
+    ai,
     audit,
     auth,
     backtest,
@@ -30,5 +31,6 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     backtest.router,
     settings.router,
     onboarding.router,
+    ai.router,
 ]
 WEBSOCKET_ROUTERS: list[APIRouter] = [ws.router]

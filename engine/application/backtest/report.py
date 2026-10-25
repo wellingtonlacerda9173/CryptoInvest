@@ -164,6 +164,7 @@ _KIND_LABEL = {
     "state_lock": "trava de estado",
     "filter": "filtro de mercado/risco",
     "selector": "seletor de estrategias",
+    "ai": "analista de IA",
 }
 
 

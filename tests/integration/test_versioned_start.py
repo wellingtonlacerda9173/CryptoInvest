@@ -72,7 +72,7 @@ async def test_the_latest_version_defines_pairs_strategies_risk_and_the_run_hash
     config = start.config
     assert config.symbols == ("BTC/USDT", "ETH/USDT") and config.timeframe.value == "4h"
     assert config.strategies == ("ema",) and config.risk == doc.risk and config.capital == D(5000)
-    assert config.document_hash == doc.digest() and config.config_hash() != base.config_hash()
+    assert config.document_hash == doc.identity_digest() and config.config_hash() != base.config_hash()
     assert [type(s) for s in start.strategies or []] == [EmaCrossTrend]
     assert start.source["origin"] == "versioned" and start.source["version_id"] == version_id
     assert (

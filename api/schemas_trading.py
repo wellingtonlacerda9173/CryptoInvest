@@ -333,3 +333,16 @@ class GlossaryOut(Out):
     terms: list[GlossaryItemOut]
     states: list[StateWordOut]
     reasons: list[ReasonWordOut]
+
+
+class AiUsageOut(Out):
+    month_start: datetime
+    spent_usd: float = Field(description="Gasto estimado da IA no mês corrente (UTC).")
+    budget_usd: float | None = Field(description="Teto mensal da última configuração salva.")
+    calls: int
+    failures: int = Field(description="Chamadas com resposta inválida, atraso ou erro.")
+    budget_stops: int = Field(description="Pedidos não enviados por orçamento ou limite por hora.")
+    by_result: dict[str, int]
+    runner_status: str | None = Field(description="Ex.: 'ligada', 'desligada', 'sem chave: IA desligada'.")
+    circuit_open: bool | None
+    calls_last_hour: int | None

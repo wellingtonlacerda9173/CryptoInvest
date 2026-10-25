@@ -15,6 +15,7 @@ def _is_sensitive(key: object) -> bool:
 
 _MAX_SCRUB_CHARS = 4096
 _URL_CREDENTIALS = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://[^:/\s@]+):[^/\s]+@")
+_ANTHROPIC_KEY = re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}")
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 _AUTH_SCHEME = re.compile(
     r"(?i)(?P<key>\bauthorization[\"']?\s*[=:]\s*[\"']?)(?:basic|digest|negotiate|bearer)\s+[^\s,;\"')}\]]+"
@@ -31,6 +32,7 @@ def scrub_text(text: str) -> str:
         text = text[:_MAX_SCRUB_CHARS] + "...[truncado]"
     text = _URL_CREDENTIALS.sub(r"\g<scheme>:***@", text)
     text = _AUTH_SCHEME.sub(lambda m: f"{m['key']}***", text)
+    text = _ANTHROPIC_KEY.sub("sk-ant-***", text)
     text = _BEARER.sub("Bearer ***", text)
     return _ASSIGNED_SECRET.sub(lambda m: f"{m['key']}{m['sep']}***", text)
 

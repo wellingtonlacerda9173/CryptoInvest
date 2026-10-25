@@ -20,6 +20,9 @@ from typing import Any
 import structlog
 from pydantic import ValidationError
 
+from engine.application.ai import AI_LOW_CONFIDENCE, AnalystOpinion, MarketAnalyst, build_request, combine
+from engine.application.ai.lessons import LessonSource, lesson_notes
+from engine.application.ai.models import MAX_LESSONS
 from engine.application.backtest.models import EquityPoint
 from engine.application.regime import classify_regime
 from engine.application.risk import (
@@ -116,6 +119,7 @@ EXIT_LEG = "x"
 EMERGENCY_LEG = "emg"
 # a foto de equity precede a fronteira do evento: trades no mesmo instante ainda contam como posteriores
 _PHOTO_LAG = timedelta(microseconds=1)
+LESSON_CACHE_SECONDS = 600
 _CAPITAL_TOLERANCE = Decimal("0.000001")
 _BACKOFF_RESET_SECONDS = 60.0
 PERSISTENCE_PAUSE = "persistencia indisponivel: "
@@ -149,6 +153,18 @@ class _Pending:
     strategy: str
     confidence: float
     record: OrderRecord
+
+
+@dataclass(frozen=True)
+class _AiTicket:
+    """Entrada ja aprovada pelo gate que aguarda o parecer da IA FORA do lock."""
+
+    result: StrategySignal
+    window: list[Candle]
+    candle: Candle
+    now: datetime
+    insight: dict[str, Any] | None
+    order_id: str
 
 
 @dataclass
@@ -198,6 +214,11 @@ class PaperRobot:
         config_source: Mapping[str, Any] | None = None,
         score_store: ScoreStore | None = None,
         backtest_samples: Sequence[TradeSample] = (),
+        analyst: MarketAnalyst | None = None,
+        ai_status: str = "desligada",
+        lesson_source: LessonSource | None = None,
+        lessons_job: Callable[[], Awaitable[object]] | None = None,
+        lessons_interval_hours: int = 168,
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -256,6 +277,13 @@ class PaperRobot:
         self._score_store = score_store
         self._backtest_samples = tuple(backtest_samples)
         self._scores: dict[ScoreKey, StrategyScore] = {}
+        self.analyst = analyst if config.ai.enabled else None
+        self._ai_status = ai_status if config.ai.enabled else "desligada"
+        self._lesson_source = lesson_source
+        self._lessons_job = lessons_job
+        self._lessons_seconds = lessons_interval_hours * 3600
+        self._lesson_cache: tuple[datetime, tuple[str, ...]] | None = None
+        self._background: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------ ciclo de vida
 
@@ -388,6 +416,8 @@ class PaperRobot:
             await self._drain_alerts()
             await self.bus.close()
             return
+        for task in list(self._background):
+            task.cancel()
         async with self._lock:
             now = self.clock.now()
             if self.journal.down:
@@ -435,7 +465,9 @@ class PaperRobot:
         if not candle.closed or candle.symbol not in self._history:
             return
         async with self._lock:
-            await self._ingest(candle)
+            tickets = await self._ingest(candle)
+        for ticket in tickets:
+            await self._finish_ai_entry(ticket)
 
     async def _supervise(self, name: str, factory: Callable[[], Awaitable[None]]) -> None:
         backoff_attempt = 0
@@ -518,8 +550,39 @@ class PaperRobot:
             "scores", now, self.config.selector.recalc_hours * 3600
         ):
             await self._recalculate_scores(now)
+        if self._lessons_job is not None and self._is_due("lessons", now, self._lessons_seconds):
+            self._spawn_lessons(self._lessons_job)
         if self.max_runtime is not None and now - self.started_at >= self.max_runtime:
             self.request_stop("tempo maximo de execucao atingido")
+
+    def _spawn_lessons(self, job: Callable[[], Awaitable[object]]) -> None:
+        """Diario de licoes em segundo plano: nunca bloqueia o ciclo e qualquer falha so vai para o log."""
+
+        async def run() -> None:
+            try:
+                await job()
+            except Exception as error:
+                log.warning("lessons_job_failed", error=scrub_text(repr(error)))
+
+        task = asyncio.create_task(run())
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def _lesson_notes(self, now: datetime) -> tuple[str, ...]:
+        """Licoes APROVADAS por admin (sanitizadas e limitadas); cache curto; falha => sem licoes."""
+        source = self._lesson_source
+        if source is None:
+            return ()
+        cached = self._lesson_cache
+        if cached is not None and now - cached[0] < timedelta(seconds=LESSON_CACHE_SECONDS):
+            return cached[1]
+        try:
+            notes = lesson_notes(await source.approved(MAX_LESSONS))
+        except Exception as error:
+            log.warning("lessons_load_failed", error=scrub_text(repr(error)))
+            notes = ()
+        self._lesson_cache = (now, notes)
+        return notes
 
     def _is_due(self, key: str, now: datetime, seconds: int) -> bool:
         last = self._due.get(key)
@@ -558,18 +621,18 @@ class PaperRobot:
         if replay:
             log.info("paper_replay_done", candles=len(replay))
 
-    async def _ingest(self, candle: Candle) -> None:
+    async def _ingest(self, candle: Candle) -> list[_AiTicket]:
         symbol = candle.symbol
         last = self._last_handled.get(symbol)
         step = timedelta(seconds=self.config.timeframe.seconds)
         if last is not None:
             if candle.open_time <= last:
-                return
+                return []
             if candle.open_time - last > step:
                 for missing in await self._recover_gap(symbol, last + step, candle.open_time):
                     await self._handle_candle(missing, stale=True)
         lag = self.clock.now() - candle.close_time
-        await self._handle_candle(candle, stale=lag > timedelta(seconds=self.config.eval_lag_seconds))
+        return await self._handle_candle(candle, stale=lag > timedelta(seconds=self.config.eval_lag_seconds))
 
     async def _recover_gap(self, symbol: str, start: datetime, end: datetime) -> list[Candle]:
         """Politica do M2: buraco de velas e recuperado por `fetch_candles`; sem sucesso, nao se opera."""
@@ -584,7 +647,7 @@ class PaperRobot:
         )
         return recovered
 
-    async def _handle_candle(self, candle: Candle, *, stale: bool) -> None:
+    async def _handle_candle(self, candle: Candle, *, stale: bool) -> list[_AiTicket]:
         symbol = candle.symbol
         now = candle.close_time if stale else max(self.clock.now(), candle.close_time)
         self.gateway.on_candle(candle)
@@ -598,11 +661,13 @@ class PaperRobot:
         await self._expire_pending(now)
         await self._place_exits()
         await self._equity(now)
+        tickets: list[_AiTicket] = []
         if stale:
             await self._decide_stale(candle)
         else:
-            await self._evaluate(candle, now)
+            tickets = await self._evaluate(candle, now)
         await self._save_state(now)
+        return tickets
 
     # ------------------------------------------------------------------ fills
 
@@ -1039,7 +1104,7 @@ class PaperRobot:
 
     # ------------------------------------------------------------------ entradas
 
-    async def _evaluate(self, candle: Candle, now: datetime) -> None:
+    async def _evaluate(self, candle: Candle, now: datetime) -> list[_AiTicket]:
         symbol = candle.symbol
         window = list(self._history[symbol])
         timeframe = self.config.timeframe
@@ -1051,13 +1116,13 @@ class PaperRobot:
             await self._record_candle_decision(
                 candle, "history_gap", f"historico com problema, nao opera: {problem}"
             )
-            return
+            return []
         strategies: Sequence[Strategy] = self.strategies
         insight: dict[str, Any] | None = None
         if self.config.selector.enabled:
             selected = await self._select(candle, window)
             if selected is None:
-                return
+                return []
             strategies, insight = selected
         found: list[StrategySignal] = []
         for strategy in strategies:
@@ -1072,10 +1137,13 @@ class PaperRobot:
                 insight=insight,
                 close=str(candle.close),
             )
-            return
+            return []
         found.sort(key=lambda s: (-s.confidence, s.signal.strategy))
+        tickets: list[_AiTicket] = []
         for index, result in enumerate(found):
-            await self._decide(result, window, candle, now, index, insight)
+            if (ticket := await self._decide(result, window, candle, now, index, insight)) is not None:
+                tickets.append(ticket)
+        return tickets
 
     async def _select(
         self, candle: Candle, window: list[Candle]
@@ -1146,6 +1214,29 @@ class PaperRobot:
         except Exception as error:  # mantem os scores anteriores
             log.error("selector_scores_recalc_failed", error=scrub_text(repr(error)))
 
+    def _skipper(
+        self, result: StrategySignal, candle: Candle, insight: dict[str, Any] | None
+    ) -> Callable[[str, str], Awaitable[None]]:
+        signal = result.signal
+
+        async def skip(code: str, message: str) -> None:
+            await self._record(
+                self._decision(
+                    at=candle.close_time,
+                    symbol=signal.symbol,
+                    action=DecisionAction.SKIP,
+                    traded=False,
+                    code=code,
+                    reason=message,
+                    strategy=signal.strategy,
+                    confidence=result.confidence,
+                    signal=signal,
+                    insight=insight,
+                )
+            )
+
+        return skip
+
     async def _decide(
         self,
         result: StrategySignal,
@@ -1154,62 +1245,59 @@ class PaperRobot:
         now: datetime,
         index: int = 0,
         insight: dict[str, Any] | None = None,
+    ) -> _AiTicket | None:
+        """Sob o lock: gate e (sem IA) ordem. Com IA devolve o ticket; o parecer sai do lock."""
+        skip = self._skipper(result, candle, insight)
+        order_id = _entry_id(candle, index)
+        outcome = await self._gate(result.signal, window, now, order_id, skip)
+        if outcome is None:
+            return None
+        if self.analyst is not None:
+            return _AiTicket(result, window, candle, now, insight, order_id)
+        await self._place_entry(outcome, result, candle, order_id, insight, skip)
+        return None
+
+    async def _finish_ai_entry(self, ticket: _AiTicket) -> None:
+        """Consulta a IA SEM o lock (nao trava book/fills) e so entao reentra para revalidar e enviar a
+        ordem. Cancelamento propaga sem tocar no lock; parada em curso descarta a entrada."""
+        result, candle, order_id = ticket.result, ticket.candle, ticket.order_id
+        if self.stop_event.is_set() or self._bot_state is not BotState.RUNNING:
+            log.info("ai_entry_dropped_on_stop", order_id=order_id)
+            return
+        opinion = await self._consult_ai(result, ticket.window, ticket.insight, order_id)
+        insight = ticket.insight
+        if opinion is not None:
+            insight = {**(insight or {}), "ai_opinion": opinion.summary(), "ai_detail": opinion.to_insight()}
+        async with self._lock:
+            if self.stop_event.is_set() or self._bot_state is not BotState.RUNNING:
+                log.info("ai_entry_dropped_on_stop", order_id=order_id)
+                return
+            skip = self._skipper(result, candle, insight)
+            combined = combine(result.confidence, opinion, min_confidence=self.config.ai_min_confidence)
+            if not combined.approved and opinion is not None and combined.code is not None:
+                await skip(
+                    combined.code, _ai_reason(combined.code, opinion, combined.confidence, self.config)
+                )
+                return
+            outcome = await self._gate(
+                result.signal, ticket.window, max(ticket.now, self.clock.now()), order_id, skip
+            )
+            if outcome is None:
+                return
+            await self._place_entry(outcome, result, candle, order_id, insight, skip)
+            await self._save_state(self.clock.now())
+
+    async def _place_entry(
+        self,
+        outcome: ApprovedEntry,
+        result: StrategySignal,
+        candle: Candle,
+        order_id: str,
+        insight: dict[str, Any] | None,
+        skip: Callable[[str, str], Awaitable[None]],
     ) -> None:
         signal = result.signal
         name = signal.strategy
-        symbol = signal.symbol
-
-        async def skip(code: str, message: str) -> None:
-            await self._record(
-                self._decision(
-                    at=candle.close_time,
-                    symbol=symbol,
-                    action=DecisionAction.SKIP,
-                    traded=False,
-                    code=code,
-                    reason=message,
-                    strategy=name,
-                    confidence=result.confidence,
-                    signal=signal,
-                    insight=insight,
-                )
-            )
-
-        if any(live.emergency is not None for live in self._live.values()):
-            await skip("emergency_exit_pending", "venda de emergencia em andamento")
-            return
-        if self._blind:
-            await skip("stops_blind", "stops cegos (sem dados de mercado): novas entradas pausadas")
-            return
-        prices = self._quotes(symbol)
-        if prices is None:
-            await skip("no_quote", "sem cotacao fresca do book para validar a entrada")
-            return
-        market = MarketSnapshot(
-            symbol=symbol,
-            at=min(self.clock.now(), now),
-            bid=prices[0],
-            ask=prices[1],
-            quote_volume_24h=rolling_quote_volume(window, self.config.timeframe),
-        )
-        order_id = _entry_id(candle, index)
-        outcome = evaluate_entry(
-            signal,
-            state=self.state,
-            config=self.risk,
-            rules=self.rules[symbol],
-            positions=[p for live in self._live.values() if (p := live.position) is not None],
-            pending=[p.approved for p in self._pending.values()],
-            market=market,
-            history=window,
-            calendar=self.calendar,
-            now=now,
-            client_order_id=order_id,
-            mode=self._calendar_mode(now),
-        )
-        if isinstance(outcome, Rejection):
-            await skip(outcome.code.value, outcome.message)
-            return
         approved = outcome.verify()
         try:
             report = await self.gateway.place_order(approved.order)
@@ -1224,7 +1312,7 @@ class PaperRobot:
         self._pending[order_id] = _Pending(approved, name, result.confidence, record)
         decision = self._decision(
             at=candle.close_time,
-            symbol=symbol,
+            symbol=signal.symbol,
             action=DecisionAction.ENTER,
             traded=True,
             code="approved",
@@ -1292,6 +1380,86 @@ class PaperRobot:
             "catch_up",
             "vela reprocessada apos queda ou atraso: gestao de posicao aplicada, nenhuma entrada avaliada",
         )
+
+    async def _gate(
+        self,
+        signal: Signal,
+        window: list[Candle],
+        now: datetime,
+        order_id: str,
+        skip: Callable[[str, str], Awaitable[None]],
+    ) -> ApprovedEntry | None:
+        """Pre-condicoes + `evaluate_entry`; registra o motivo e devolve None se a entrada nao passa. Roda de
+        novo depois do parecer da IA (que espera sem o lock): o estado e a cotacao podem ter mudado."""
+        symbol = signal.symbol
+        if any(live.emergency is not None for live in self._live.values()):
+            await skip("emergency_exit_pending", "venda de emergencia em andamento")
+            return None
+        if self._blind:
+            await skip("stops_blind", "stops cegos (sem dados de mercado): novas entradas pausadas")
+            return None
+        prices = self._quotes(symbol)
+        if prices is None:
+            await skip("no_quote", "sem cotacao fresca do book para validar a entrada")
+            return None
+        market = MarketSnapshot(
+            symbol=symbol,
+            at=min(self.clock.now(), now),
+            bid=prices[0],
+            ask=prices[1],
+            quote_volume_24h=rolling_quote_volume(window, self.config.timeframe),
+        )
+        outcome = evaluate_entry(
+            signal,
+            state=self.state,
+            config=self.risk,
+            rules=self.rules[symbol],
+            positions=[p for live in self._live.values() if (p := live.position) is not None],
+            pending=[p.approved for p in self._pending.values()],
+            market=market,
+            history=window,
+            calendar=self.calendar,
+            now=now,
+            client_order_id=order_id,
+            mode=self._calendar_mode(now),
+        )
+        if isinstance(outcome, Rejection):
+            await skip(outcome.code.value, outcome.message)
+            return None
+        return outcome
+
+    async def _consult_ai(
+        self,
+        result: StrategySignal,
+        window: list[Candle],
+        insight: dict[str, Any] | None,
+        order_id: str,
+    ) -> AnalystOpinion | None:
+        """Parecer da IA sobre um sinal que o gate JA aprovou. Chamada FORA do lock (nao trava book/fills);
+        qualquer falha vira "sem parecer": o robo segue exatamente como sem IA."""
+        analyst = self.analyst
+        if analyst is None:
+            return None
+        signal = result.signal
+        scores = [
+            (str(e.get("strategy")), float(e["score"]))
+            for e in (insight or {}).get("scores", [])
+            if isinstance(e, dict) and isinstance(e.get("score"), int | float)
+        ]
+        try:
+            request = build_request(
+                window,
+                result,
+                scores=scores,
+                regime=(insight or {}).get("regime") or None,
+                lessons=await self._lesson_notes(self.clock.now()),
+            )
+            key = f"{signal.strategy}:{signal.symbol}:{signal.created_at:%y%m%d%H%M}"
+            limit = self.config.ai.timeout_seconds * 2 + 5
+            return await asyncio.wait_for(analyst.analyze(request, decision_key=key), timeout=limit)
+        except Exception as error:
+            log.warning("ai_consult_failed", order_id=order_id, error=scrub_text(repr(error)))
+            return None
 
     async def _record_candle_decision(
         self,
@@ -2129,7 +2297,13 @@ class PaperRobot:
             "risk": self.risk.model_dump(mode="json"),
             "outbox_pending": self.journal.pending_events,
             "persistence_error": self.journal.last_error if self.journal.down else None,
+            "ai": self._ai_payload(),
         }
+
+    def _ai_payload(self) -> dict[str, Any]:
+        detail = getattr(self.analyst, "status", None)
+        extra = detail() if callable(detail) else {}
+        return {"status": self._ai_status, "enabled": self.analyst is not None, **extra}
 
     def _write_status(self, now: datetime) -> None:
         if self.paths is not None:
@@ -2205,6 +2379,15 @@ class PaperRobot:
             )
         except Exception as error:
             log.error("event_bus_failed", kind=kind, error=scrub_text(repr(error)))
+
+
+def _ai_reason(code: str, opinion: AnalystOpinion, confidence: float, config: PaperRunConfig) -> str:
+    if code == AI_LOW_CONFIDENCE:
+        return (
+            f"IA reduziu a confianca para {confidence:.0%}, abaixo do minimo de "
+            f"{config.ai_min_confidence:.0%}: {opinion.reason}"
+        )
+    return f"IA vetou a entrada: {opinion.reason}"
 
 
 def _entry_id(candle: Candle, index: int = 0) -> str:

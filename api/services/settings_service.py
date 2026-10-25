@@ -318,11 +318,7 @@ def version_out(version: ConfigVersion, command_state: str | None = None) -> Set
 
 def change_out(change: FieldChange, capital: Decimal) -> FieldChangeOut:
     text = describe(change, capital)
-    applies = (
-        "now"
-        if change.section == "ai" or (change.section == "risk" and change.effect is Effect.DECREASE)
-        else "next_start"
-    )
+    applies = "now" if change.section == "risk" and change.effect is Effect.DECREASE else "next_start"
     return FieldChangeOut(
         path=change.path,
         label=text["label"],

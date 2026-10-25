@@ -440,6 +440,8 @@ class Harness:
         strategies: Sequence[Strategy] | None = None,
         score_store: Any = None,
         backtest_samples: Sequence[Any] = (),
+        analyst: Any = None,
+        lesson_source: Any = None,
     ) -> None:
         self.clock = clock or FakeClock(T0 + timedelta(hours=29))
         self.journal: Any = journal or MemoryJournal()
@@ -463,6 +465,8 @@ class Harness:
             persist_retry_delays=(0.001, 0.001, 0.001),
             score_store=score_store,
             backtest_samples=backtest_samples,
+            analyst=analyst,
+            lesson_source=lesson_source,
         )
 
     async def start(self) -> "Harness":

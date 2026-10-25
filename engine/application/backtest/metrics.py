@@ -76,6 +76,8 @@ STATE_LOCK_CODES = frozenset(
 HALT_CODE = "robot_halted"
 # veto do seletor de estrategias (opt-in): mede o valor do seletor, nao dos filtros de risco
 SELECTOR_CODES = frozenset({"selector_veto"})
+# veto do analista de IA (opt-in, injetado): mede o valor da IA, nao dos filtros de risco
+AI_CODES = frozenset({"ai_veto", "ai_low_confidence"})
 
 
 def veto_kind(code: str) -> str:
@@ -83,6 +85,8 @@ def veto_kind(code: str) -> str:
         return "capacity"
     if code in SELECTOR_CODES:
         return "selector"
+    if code in AI_CODES:
+        return "ai"
     return "state_lock" if code in STATE_LOCK_CODES else "filter"
 
 

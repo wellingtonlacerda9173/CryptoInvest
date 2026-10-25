@@ -48,6 +48,17 @@ REASONS: Final[dict[str, Reason]] = {
     "selector_veto": Reason(
         "Não entrou", "O seletor escolheu outra estratégia (ou nenhuma) para este tipo de mercado.", "refused"
     ),
+    "ai_veto": Reason(
+        "Não entrou",
+        "O assistente de IA vetou esta entrada depois de ela passar pelos filtros de risco. "
+        "A IA só pode barrar ou reduzir a confiança, nunca aumentar o risco.",
+        "refused",
+    ),
+    "ai_low_confidence": Reason(
+        "Não entrou",
+        "O assistente de IA reduziu a confiança do sinal abaixo do mínimo exigido.",
+        "refused",
+    ),
     "history_gap": Reason(
         "Não entrou", "Faltam dados recentes de mercado para decidir com segurança.", "refused"
     ),

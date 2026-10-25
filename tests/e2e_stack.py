@@ -23,10 +23,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from api.cli import init_secrets
+from engine.application.ai.lesson_job import NewLesson
+from engine.application.ai.lessons import (
+    LessonReport,
+    Observation,
+    build_summary,
+    deterministic_report,
+)
 from engine.domain.candle import Candle
 from engine.domain.types import Timeframe
 from engine.infrastructure.config.settings import load_settings
 from engine.infrastructure.persistence.candle_repository import CandleRepository
+from engine.infrastructure.persistence.lesson_repository import SqlLessonStore
 from engine.infrastructure.persistence.models import DecisionRow, TradeRow
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.command_channel import RedisCommandSource, load_command_key
@@ -106,6 +114,49 @@ def _seed_screens(url: object) -> None:
                             risk_amount=Decimal("25"), r_multiple=Decimal(r),
                         )
                     )  # fmt: skip
+        finally:
+            await engine.dispose()
+
+    asyncio.run(go())
+
+
+def _seed_lessons(url: object) -> None:
+    """Duas licoes PENDENTES (so neste banco `*_test`): uma com texto da IA contendo marcacao HTML (o painel
+    precisa exibi-la como texto) e uma so com estatisticas."""
+
+    async def go() -> None:
+        engine = create_engine(url)  # type: ignore[arg-type]
+        try:
+            store = SqlLessonStore(create_session_factory(engine))
+            now = datetime.now(UTC).replace(microsecond=0)
+            start = now - timedelta(days=7)
+            summary = build_summary([], {"ai_veto": 2, "selector_idle": 5}, {}, start=start, end=now)
+            # `model_construct` pula a sanitizacao: o banco guarda marcacao crua, a API limpa ao ler
+            observation = Observation.model_construct(
+                text="Ao vivo a <b>elephant</b> perdeu mais em mercado lateral.",
+                evidence="4 perdas em 6 operações, -4,00R",
+                confidence="low",
+            )
+            ai_report = LessonReport.model_construct(
+                summary="Semana de poucas operações; a elephant perdeu em mercado lateral.",
+                observations=(observation,),
+            )
+            for age, source, report in (
+                (timedelta(hours=1), "ai", ai_report),
+                (timedelta(days=7, hours=1), "deterministic", deterministic_report(summary)),
+            ):
+                await store.add(
+                    NewLesson(
+                        created_at=now - age,
+                        period_start=start - age,
+                        period_end=now - age,
+                        source=source,  # type: ignore[arg-type]
+                        model="claude-haiku-5-5" if source == "ai" else None,
+                        prompt_version="lessons-v1" if source == "ai" else "deterministic-v1",
+                        summary=summary,
+                        report=report,
+                    )
+                )
         finally:
             await engine.dispose()
 
@@ -244,6 +295,7 @@ def run(args: argparse.Namespace) -> None:
             seed_once(db_url)()
             _seed_screens(db_url)
             _seed_candles(db_url)
+            _seed_lessons(db_url)
             env = _env(secrets_dir, name, args, prefix, url)
             cli = [sys.executable, "-m", "api.cli", "create-admin", "--password-stdin"]
             created = subprocess.run(  # noqa: S603

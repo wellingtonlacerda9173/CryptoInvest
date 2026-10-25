@@ -65,7 +65,12 @@ async def test_reader_and_admin_read_the_settings_with_defaults_limits_and_field
     assert admin_view["document"] == reader_view["document"] == admin_view["defaults"]
     assert admin_view["document"]["risk"]["risk_per_trade"] == "0.005"
     assert set(admin_view["document"]) == {"pairs", "strategies", "risk", "ai"}
-    assert admin_view["document"]["ai"] == {"enabled": False, "model": "claude-sonnet-5-5"}
+    assert admin_view["document"]["ai"] == {
+        "enabled": False,
+        "model": "claude-haiku-5-5",
+        "monthly_budget_usd": "20",
+        "timeout_seconds": 8.0,
+    }
     assert (
         admin_view["effective"]["restart_rule"] == RESTART_RULE
         and admin_view["effective"]["runner_connected"] is False
@@ -402,7 +407,7 @@ async def test_pairs_strategies_and_ai_sections(rh: Harness, rh_admin: Session, 
     assert none_enabled.status_code == 422
 
     ai = (await put(rh_admin, "ai", {"enabled": True})).json()
-    assert ai["activation"] == "immediate" and ai["command"] is None
+    assert ai["activation"] == "next_start" and ai["command"] is None
     assert (await put(rh_admin, "ai", {"model": "modelo com espaco"})).status_code == 422
     assert len(fake_link.pushed) == pushed
 

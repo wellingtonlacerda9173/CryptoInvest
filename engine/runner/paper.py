@@ -24,12 +24,16 @@ from engine.application.selector import SelectorSettings
 from engine.application.strategies.registry import STRATEGY_REGISTRY
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Timeframe
+from engine.infrastructure.ai.factory import build_analyst
+from engine.infrastructure.ai.pricing import load_prices
 from engine.infrastructure.binance.market_data import BinanceMarketData
 from engine.infrastructure.config.logging import configure_logging, scrub_text
 from engine.infrastructure.config.redis_auth import with_redis_password
 from engine.infrastructure.config.settings import Settings, load_settings, resolve_secrets_dir
 from engine.infrastructure.notifications import AlertDispatcher, NotifySettings, build_notifier
 from engine.infrastructure.paper import SystemClock
+from engine.infrastructure.persistence.ai_call_repository import SqlAiCallStore
+from engine.infrastructure.persistence.lesson_repository import SqlLessonStore
 from engine.infrastructure.persistence.recovery import load_recovery_state
 from engine.infrastructure.persistence.session import create_engine, create_session_factory
 from engine.runner.backtest import STRATEGY_NAMES, build_strategies, git_version, parse_values
@@ -39,6 +43,7 @@ from engine.runner.command_channel import (
     SqlAuditSink,
     load_command_key,
 )
+from engine.runner.lessons import generate_lesson
 from engine.runner.paper_config import (
     DEFAULT_CALENDAR,
     DEFAULT_DATA_DIR,
@@ -112,6 +117,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--selector-recalc-hours", type=int, default=6)
     start.add_argument(
+        "--lessons-hours",
+        type=int,
+        default=168,
+        help="intervalo do diario de licoes em horas (padrao semanal; 0 desliga). Licoes nascem pendentes",
+    )
+    start.add_argument(
         "--selector-samples-dir",
         type=Path,
         default=DEFAULT_SAMPLES_DIR,
@@ -166,6 +177,9 @@ def _run_id(args: argparse.Namespace, *, create: bool = False) -> str:
     if latest is None:
         raise SystemExit("nenhum run encontrado: informe --run-id")
     return latest
+
+
+AI_PRICES_FILE = Path("config/ai_prices.json")
 
 
 def _rules(symbols: Sequence[str]) -> dict[str, SymbolRules]:
@@ -255,6 +269,24 @@ async def run_start(args: argparse.Namespace) -> int:
         config = config.model_copy(update={"strategies": tuple(names)})
         strategies = [STRATEGY_REGISTRY[n]() for n in names]
     paths.config.write_text(config.model_dump_json(indent=2), encoding="utf-8")
+    ai = build_analyst(config.ai, settings, SqlAiCallStore(sessions), load_prices(AI_PRICES_FILE))
+    lesson_store = SqlLessonStore(sessions)
+
+    async def lessons_job() -> None:
+        last = await lesson_store.latest_created_at()
+        if last is not None and datetime.now(UTC) - last < timedelta(hours=args.lessons_hours):
+            return
+        result = await generate_lesson(
+            sessions,
+            settings,
+            timeframe=config.timeframe.value,
+            symbols=config.symbols,
+            samples_dir=args.selector_samples_dir,
+            analyst=ai.analyst,
+            use_ai=ai.analyst is not None,
+        )
+        log.info("lessons_generated", lesson_id=result.lesson_id, source=result.source)
+
     robot = PaperRobot(
         config,
         run_id=run_id,
@@ -262,6 +294,11 @@ async def run_start(args: argparse.Namespace) -> int:
         bus=bus,
         market=market,
         strategies=strategies,
+        analyst=ai.analyst,
+        ai_status=ai.status,
+        lesson_source=lesson_store if ai.analyst is not None else None,
+        lessons_job=lessons_job if args.lessons_hours > 0 and config.selector.enabled else None,
+        lessons_interval_hours=max(args.lessons_hours, 1),
         score_store=SqlScoreStore(sessions) if config.selector.enabled else None,
         backtest_samples=(
             read_samples(samples_path(args.selector_samples_dir, config.timeframe.value))

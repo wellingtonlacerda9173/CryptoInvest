@@ -110,7 +110,18 @@ export function DecisionItem({ decision: d }: { decision: Decision }) {
             ) : null}
 
             <dt className="font-semibold">Parecer da IA</dt>
-            <dd>
+            <dd className="flex flex-col gap-1">
+              {insight.aiDetail ? (
+                <span>
+                  <Chip
+                    tone={insight.aiDetail.verdict === 'veto' ? 'warn' : 'ok'}
+                    icon={insight.aiDetail.verdict === 'veto' ? Pause : ArrowUp}
+                  >
+                    {insight.aiDetail.verdict === 'veto' ? 'IA vetou' : 'IA aprovou'} · confiança{' '}
+                    {formatNumber(insight.aiDetail.confidence * 100, 0)}%
+                  </Chip>
+                </span>
+              ) : null}
               {insight.ai ?? (
                 <span className="text-muted">
                   Sem parecer da IA nesta decisão. A IA é opcional: quando está desligada ou não foi

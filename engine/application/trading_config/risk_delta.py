@@ -103,6 +103,8 @@ LABELS: dict[str, str] = {
     "strategies.reward_risk": "Retorno/risco alvo",
     "ai.enabled": "Assistente de IA",
     "ai.model": "Modelo de IA",
+    "ai.monthly_budget_usd": "Orçamento mensal da IA (US$)",
+    "ai.timeout_seconds": "Prazo de resposta da IA (s)",
 }
 
 
@@ -264,6 +266,13 @@ def cost_text(change: FieldChange, capital: Decimal) -> str:
         )
     if name in ("max_total_exposure_fraction", "max_coin_exposure_fraction", "max_position_fraction"):
         return f"Até {fmt_value(change.path, change.after)} do saldo pode ficar comprado em moedas."
+    if change.path == "ai.monthly_budget_usd" and _numeric(change.before, change.after):
+        if _num(change.after) > _num(change.before):
+            return (
+                f"Aumento de custo (não de risco): a IA pode gastar até US$ {_num(change.after)} por mês; "
+                f"antes eram US$ {_num(change.before)}. O robô para de chamar a IA ao atingir o teto."
+            )
+        return "Redução de custo: a IA passa a ter um teto mensal menor."
     if change.effect is Effect.INCREASE:
         return "Esta mudança deixa o robô aceitar mais risco do que hoje."
     if change.effect is Effect.UNKNOWN:

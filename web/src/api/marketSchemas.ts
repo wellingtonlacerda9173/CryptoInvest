@@ -111,6 +111,7 @@ export interface SignalInsight {
   regime: string | null;
   scores: { strategy: string; score: number }[];
   ai: string | null;
+  aiDetail: { verdict: 'approve' | 'veto'; confidence: number; reason: string } | null;
   levels: { entry: number | null; stop: number | null; target: number | null };
 }
 
@@ -120,6 +121,16 @@ const asNumber = (v: unknown): number | null => {
 };
 const asText = (v: unknown, max = 600): string | null =>
   typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
+
+function readAiDetail(raw: unknown): SignalInsight['aiDetail'] {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const d = raw as Record<string, unknown>;
+  const confidence = asNumber(d.confidence);
+  const reason = asText(d.reason, 280);
+  if ((d.verdict !== 'approve' && d.verdict !== 'veto') || confidence === null || !reason)
+    return null;
+  return { verdict: d.verdict, confidence, reason };
+}
 
 export function readSignal(signal: Record<string, unknown> | null): SignalInsight {
   const s = signal ?? {};
@@ -143,6 +154,7 @@ export function readSignal(signal: Record<string, unknown> | null): SignalInsigh
     regime: asText(s.regime, 80),
     scores,
     ai: asText(s.ai_opinion ?? s.ai),
+    aiDetail: readAiDetail(s.ai_detail),
     levels: {
       entry: asNumber(s.entry),
       stop: asNumber(s.stop_loss),

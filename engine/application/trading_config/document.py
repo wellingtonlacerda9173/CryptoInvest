@@ -6,6 +6,7 @@ O documento e a fonte da verdade lida pelo runner no start. Os tetos rigidos de 
 
 import hashlib
 import json
+from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, StringConstraints, model_validator
@@ -19,6 +20,11 @@ from engine.domain.types import StrictDecimal, Symbol, Timeframe
 Section = Literal["pairs", "strategies", "risk", "ai"]
 SECTIONS: tuple[Section, ...] = ("pairs", "strategies", "risk", "ai")
 MAX_PAIRS = 10
+DEFAULT_AI_MODEL = "claude-haiku-5-5"
+# formato do digest antes da Fase 6: o hash dos documentos (e dos runs) existentes nao pode mudar
+LEGACY_AI_DIGEST: dict[str, Any] = {"enabled": False, "model": "claude-sonnet-5-5"}
+MAX_AI_MONTHLY_BUDGET_USD = Decimal(200)
+MAX_AI_TIMEOUT_SECONDS = 15.0
 ModelName = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[A-Za-z0-9._:-]{1,64}$")]
 
 
@@ -85,10 +91,14 @@ class StrategiesConfig(DomainModel):
 
 
 class AiConfig(DomainModel):
-    """A IA so explica e resume: nenhum campo aqui chega ao motor de ordens ou de risco."""
+    """A IA so pode vetar ou reduzir a confianca de um sinal ja aprovado pelo gate: nenhum campo aqui chega
+    ao motor de ordens ou de risco. Orcamento e prazo tem tetos rigidos; o padrao do modelo e o mais barato
+    da familia atual (decisao de custo, nao de risco; troque em `ai.model`)."""
 
     enabled: bool = False
-    model: ModelName = "claude-sonnet-5-5"
+    model: ModelName = DEFAULT_AI_MODEL
+    monthly_budget_usd: StrictDecimal = Field(default=Decimal(20), ge=0, le=MAX_AI_MONTHLY_BUDGET_USD)
+    timeout_seconds: float = Field(default=8.0, gt=0, le=MAX_AI_TIMEOUT_SECONDS)
 
 
 class ConfigDocument(DomainModel):
@@ -105,7 +115,26 @@ class ConfigDocument(DomainModel):
         return data
 
     def digest(self) -> str:
-        return canonical_hash(self.dump())
+        """Hash da versao inteira (cadeia `config_versions`). `ai` no padrao ou so com `enabled`/`model`
+        mantem o formato legado, entao o hash de documentos anteriores a Fase 6 e identico."""
+        data = self.dump()
+        ai, default = self.ai, AiConfig()
+        if ai == default:
+            data["ai"] = dict(LEGACY_AI_DIGEST)
+        elif (ai.monthly_budget_usd, ai.timeout_seconds) == (
+            default.monthly_budget_usd,
+            default.timeout_seconds,
+        ):
+            data["ai"] = {"enabled": ai.enabled, "model": ai.model}
+        return canonical_hash(data)
+
+    def identity_digest(self) -> str:
+        """Identidade do RUN (`config_hash`): a IA e uma camada que so reduz e acompanha a versao nova a cada
+        start; ligar/desligar, trocar modelo, orcamento ou prazo nao pode impedir a retomada de um run com
+        posicao aberta. Fica sempre no formato legado, igual ao hash dos runs anteriores."""
+        data = self.dump()
+        data["ai"] = dict(LEGACY_AI_DIGEST)
+        return canonical_hash(data)
 
     def with_section(self, section: Section, value: dict[str, Any]) -> "ConfigDocument":
         data = self.dump()

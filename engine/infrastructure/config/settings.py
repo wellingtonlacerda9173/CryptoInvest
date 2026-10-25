@@ -12,7 +12,9 @@ from sqlalchemy import URL
 log = structlog.get_logger()
 
 DEFAULT_SECRETS_DIR = "/run/secrets"
-_SECRET_FIELDS = frozenset({"database_password", "binance_api_key", "binance_api_secret"})
+_SECRET_FIELDS = frozenset(
+    {"database_password", "binance_api_key", "binance_api_secret", "anthropic_api_key"}
+)
 
 
 class _WithoutSecrets(PydanticBaseSettingsSource):
@@ -61,6 +63,8 @@ class Settings(BaseSettings):
     paper_ws_url: str = "wss://stream.binance.com:443"
     binance_api_key: SecretStr | None = None
     binance_api_secret: SecretStr | None = None
+    # arquivo secreto `anthropic_api_key` em SECRETS_DIR; ausente => IA desligada
+    anthropic_api_key: SecretStr | None = None
 
     @classmethod
     def settings_customise_sources(

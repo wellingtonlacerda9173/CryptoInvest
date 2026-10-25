@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from engine.application.ai import MarketAnalyst, build_request, combine
 from engine.application.backtest.hypothetical import simulate_signal
 from engine.application.backtest.models import (
     BacktestInvariantError,
@@ -130,6 +131,8 @@ class BacktestEngine:
         clock: Clock = _utc_now,
         selector: SelectorSettings | None = None,
         selector_history: Sequence[TradeSample] = (),
+        analyst: MarketAnalyst | None = None,
+        ai_min_confidence: float = 0.5,
     ) -> None:
         if not strategies:
             raise ValueError("at least one strategy is required")
@@ -140,6 +143,9 @@ class BacktestEngine:
         self.clock = clock
         self.selector = selector if selector is not None and selector.enabled else None
         self.selector_history = tuple(selector_history)
+        # so analista injetado (fake/replay): o backtest nunca chama a IA real; None = sem IA, como antes
+        self.analyst = analyst
+        self.ai_min_confidence = ai_min_confidence
 
     async def run(self, candles: Sequence[Candle], *, start: int = 0) -> BacktestResult:
         """`candles[:start]` e so aquecimento dos indicadores; o backtest roda de `start` ate o fim."""
@@ -586,6 +592,11 @@ class _Session:
         if isinstance(outcome, Rejection):
             self._veto(name, outcome.code.value, outcome.message, signal, result.confidence, context)
             return
+        if self.engine.analyst is not None:
+            vetoed, context = await self._review(result, window, context)
+            if vetoed is not None:
+                self._veto(name, vetoed[0], vetoed[1], signal, result.confidence, context)
+                return
         self.approvals += 1
         order_id = outcome.order.client_order_id
         report = await self.gateway.place_order(outcome.order)
@@ -605,6 +616,25 @@ class _Session:
         self._record(
             name, DecisionAction.TRADED, "approved", reason, signal, result.confidence, order_id, context
         )
+
+    async def _review(
+        self, result: StrategySignal, window: list[Candle], context: dict[str, Any] | None
+    ) -> tuple[tuple[str, str] | None, dict[str, Any] | None]:
+        """Parecer do analista injetado depois do gate: so pode vetar (codigo, mensagem) ou reduzir."""
+        analyst = self.engine.analyst
+        opinion = None
+        if analyst is not None:
+            try:
+                opinion = await analyst.analyze(build_request(window, result))
+            except Exception:  # sem parecer: segue como sem IA
+                opinion = None
+        if opinion is None:
+            return None, context
+        context = {**(context or {}), "ai_opinion": opinion.summary(), "ai_detail": opinion.to_insight()}
+        combined = combine(result.confidence, opinion, min_confidence=self.engine.ai_min_confidence)
+        if combined.approved or combined.code is None:
+            return None, context
+        return (combined.code, f"IA: {opinion.reason}"), context
 
     def _veto(
         self,

@@ -476,6 +476,73 @@ test('configuracoes: chave Binance nova nunca ecoa o segredo', async () => {
   await expectNoSevereAxe(page);
 });
 
+test('licoes da IA: texto como texto, aprovar e rejeitar com motivo e reautenticacao, e valor da IA', async () => {
+  await page.goto('/configuracoes?aba=ia');
+  await expect(page.getByText('A IA só veta ou reduz a confiança.')).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByText('Uso da IA no mês')).toBeVisible();
+  await expect(page.getByRole('group', { name: /Gasto da IA no mês/ })).toBeVisible();
+  await expectNoSevereAxe(page);
+
+  await page.goto('/configuracoes?aba=licoes');
+  const lessons = page.getByRole('list', { name: 'Lições' });
+  await expect(lessons.getByRole('listitem')).toHaveCount(2, { timeout: 30_000 });
+  const detail = page.getByRole('article', { name: 'Detalhe da lição' });
+  // o banco guarda marcacao crua; a API a sanitiza na leitura e o painel exibe so texto
+  await expect(detail).toContainText('[removido]elephant[removido]', { timeout: 30_000 });
+  await expect(detail).not.toContainText('<b>');
+  await expect(detail.locator('b')).toHaveCount(0);
+  await expect(detail).toContainText('Evidência: 4 perdas em 6 operações');
+  await expect(detail).toContainText('Pendente de revisão');
+  await expect(page.getByText(/nunca mudam regras de risco/)).toBeVisible();
+  await shoot(page, 'licoes-ia', async () => {
+    await expect(page.getByRole('article', { name: 'Detalhe da lição' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  });
+  await expectNoSevereAxe(page);
+
+  const review = async (label: 'Aprovar' | 'Rejeitar', reason: string) => {
+    await page
+      .getByRole('article', { name: 'Detalhe da lição' })
+      .getByRole('button', { name: label })
+      .click();
+    const dialog = page.getByRole('alertdialog', { name: new RegExp(`${label} esta lição`) });
+    await expect(dialog.getByRole('button', { name: label })).toBeDisabled();
+    await dialog.getByLabel(/Motivo/).fill(reason);
+    await dialog.getByRole('button', { name: label }).click();
+    await reauthIfAsked(page);
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+  };
+
+  await review('Aprovar', 'confere com o que vimos na semana');
+  await expect(detail).toContainText('Aprovada', { timeout: 30_000 });
+  await expect(detail).toContainText('confere com o que vimos na semana');
+  await expect(detail.getByRole('button', { name: 'Aprovar' })).toBeDisabled();
+
+  await lessons.getByRole('listitem').nth(1).getByRole('button').click();
+  await expect(detail).toContainText('Só estatísticas', { timeout: 30_000 });
+  await review('Rejeitar', 'sem operações para concluir algo');
+  await expect(detail).toContainText('Rejeitada', { timeout: 30_000 });
+  await expect(lessons).toContainText('Aprovada');
+  await expect(lessons).toContainText('Rejeitada');
+  await expectNoSevereAxe(page);
+
+  await page.goto('/configuracoes?aba=valor');
+  await expect(page.getByRole('heading', { name: 'Valor da IA' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Sem atividade da IA neste período')).toBeVisible({
+    timeout: 30_000,
+  });
+  await shoot(page, 'valor-ia', async () => {
+    await expect(page.getByText('Sem atividade da IA neste período')).toBeVisible({
+      timeout: 30_000,
+    });
+  });
+  await expectNoSevereAxe(page);
+});
+
 test('sair e entrar de novo com o segundo fator', async () => {
   await page.goto('/dashboard');
   await page.getByRole('button', { name: 'Sair' }).click();

@@ -17,7 +17,9 @@ import { buttonVariants } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { AiValueTab } from './configuracoes/AiValueTab';
 import { KeysTab } from './configuracoes/KeysTab';
+import { LessonsTab } from './configuracoes/LessonsTab';
 import { AiTab, PairsTab, RiskTab, StrategiesTab } from './configuracoes/Tabs';
 import { ApplicationState, VersionHistory } from './configuracoes/VersionHistory';
 
@@ -28,6 +30,8 @@ const TABS = [
   ['estrategias', 'Estratégias'],
   ['risco', 'Risco'],
   ['ia', 'IA'],
+  ['licoes', 'Lições da IA'],
+  ['valor', 'Valor da IA'],
   ['chaves', 'Conta e chaves'],
 ] as const;
 
@@ -162,6 +166,12 @@ export default function ConfiguracoesPage() {
                 {node}
               </Tabs.Content>
             ))}
+            <Tabs.Content value="licoes">
+              <LessonsTab />
+            </Tabs.Content>
+            <Tabs.Content value="valor">
+              <AiValueTab />
+            </Tabs.Content>
             <Tabs.Content value="chaves" className="flex flex-col gap-4">
               <KeysTab canEdit={s.can_edit} />
               <p className="text-sec text-muted">

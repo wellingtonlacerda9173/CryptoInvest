@@ -22,6 +22,18 @@ const base = (over: Routes_ = {}): Routes_ => ({
   'GET /settings': () => makeFullSettings(),
   'GET /settings/history': () => history,
   'GET /credentials': () => [makeCredential()],
+  'GET /ai/usage': () => ({
+    month_start: '2026-10-01T00:00:00Z',
+    spent_usd: 1,
+    budget_usd: 20,
+    calls: 2,
+    failures: 0,
+    budget_stops: 0,
+    by_result: { ok: 2 },
+    runner_status: 'desligada',
+    circuit_open: null,
+    calls_last_hour: null,
+  }),
   ...over,
 });
 
@@ -46,7 +58,7 @@ describe('Configuracoes', () => {
     renderPage(<ConfiguracoesPage />, { path: '/?aba=risco' });
     await ready();
     expect(await screen.findByRole('tab', { name: 'Conta e chaves' })).toBeInTheDocument();
-    for (const t of ['Pares', 'Estratégias', 'Risco', 'IA'])
+    for (const t of ['Pares', 'Estratégias', 'Risco', 'IA', 'Lições da IA', 'Valor da IA'])
       expect(screen.getByRole('tab', { name: t })).toBeInTheDocument();
     expect(await panel().findByText('Risco por operação: no máximo 1,00%')).toBeInTheDocument();
     expect(panel().getByLabelText('Risco por operação (%)')).toHaveValue('0.5');
@@ -60,7 +72,8 @@ describe('Configuracoes', () => {
     stubApi(base());
     renderPage(<ConfiguracoesPage />, { path: '/?aba=ia' });
     await ready();
-    expect(await panel().findByText('A IA só explica e resume.')).toBeInTheDocument();
+    expect(await panel().findByText('A IA só veta ou reduz a confiança.')).toBeInTheDocument();
+    expect(await panel().findByText(/Uso da IA no mês/)).toBeInTheDocument();
     expect(panel().getByRole('switch', { name: /Assistente de IA/ })).not.toBeChecked();
   });
 

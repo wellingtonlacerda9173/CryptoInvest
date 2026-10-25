@@ -51,6 +51,31 @@ describe('Decisoes ao vivo', () => {
     expect(within(first).getByText(/O robô entrou na operação/)).toBeInTheDocument();
   });
 
+  it('mostra o veredito "IA vetou" com a confianca e o motivo como texto', async () => {
+    const vetoed = makeDecision(1, {
+      outcome: 'Não entrou',
+      outcome_kind: 'refused',
+      traded: false,
+      code: 'ai_veto',
+      reason_text: 'O assistente de IA vetou esta entrada.',
+      signal: {
+        ai_opinion: 'Vetou (confiança 90%): tendência <i>contrária</i>.',
+        ai_detail: {
+          verdict: 'veto',
+          confidence: 0.9,
+          reason: 'tendência <i>contrária</i>',
+          untrusted: true,
+        },
+      },
+    });
+    stubApi({ 'GET /settings': () => SETTINGS, 'GET /decisions': () => page([vetoed]) });
+    const { container } = renderPage(<DecisoesPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /Detalhes/ }));
+    expect(screen.getByText(/IA vetou · confiança 90%/)).toBeInTheDocument();
+    expect(screen.getByText(/tendência <i>contrária<\/i>\./)).toBeInTheDocument();
+    expect(container.querySelector('i')).toBeNull();
+  });
+
   it('sem regime e sem IA, explica o vazio em vez de esconder', async () => {
     stubApi({ 'GET /settings': () => SETTINGS, 'GET /decisions': () => page([makeDecision(1)]) });
     renderPage(<DecisoesPage />);

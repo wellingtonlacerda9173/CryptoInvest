@@ -58,7 +58,9 @@ async def apply_versioned_config(
             "params": {},
             "risk": document.risk,
             "history_window": history,
-            "document_hash": document.digest(),
+            "document_hash": document.identity_digest(),
+            "ai": document.ai,
+            "ai_min_confidence": strategies.min_confidence,
         }
     )
     source = {

@@ -300,6 +300,90 @@ class StrategyScoreRow(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AiCallRow(Base):
+    """Uma linha por chamada ao analista de IA (inclusive falhas e recusas por orcamento), append-only.
+
+    Sem dados sensiveis: so hashes, texto sanitizado da resposta, tokens e custo estimado.
+    """
+
+    __tablename__ = "ai_calls"
+    __table_args__ = (
+        CheckConstraint(
+            "result IN ('ok', 'invalid', 'timeout', 'budget', 'error', 'cancelled', 'reserve')",
+            name="ck_ai_calls_result",
+        ),
+        CheckConstraint(
+            "input_tokens >= 0 AND output_tokens >= 0 AND cost_usd >= 0", name="ck_ai_calls_usage"
+        ),
+        Index("ix_ai_calls_called_at", text("called_at DESC")),
+        Index(
+            "ux_ai_calls_reservation",
+            "reservation_id",
+            unique=True,
+            postgresql_where=text("reservation_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    called_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    prompt_hash: Mapped[str] = mapped_column(String(64))
+    response_hash: Mapped[str | None] = mapped_column(String(64))
+    response_text: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer)
+    output_tokens: Mapped[int] = mapped_column(Integer)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(14, 6))
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    result: Mapped[str] = mapped_column(String(10))
+    decision_key: Mapped[str | None] = mapped_column(String(64))
+    reservation_id: Mapped[int | None] = mapped_column(BigInteger)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiLessonRow(Base):
+    """Relatorio de licoes do job, append-only. O estado de aprovacao vive em `ai_lesson_reviews`."""
+
+    __tablename__ = "ai_lessons"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'deterministic')", name="ck_ai_lessons_source"),
+        CheckConstraint("period_end >= period_start", name="ck_ai_lessons_period"),
+        Index("ix_ai_lessons_created", text("created_at DESC"), "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(14))
+    model: Mapped[str | None] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    summary: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    report: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiLessonReviewRow(Base):
+    """Decisoes humanas sobre licoes, append-only: a mais recente por licao vale; so admin (CHECK)."""
+
+    __tablename__ = "ai_lesson_reviews"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_ai_lesson_reviews_status"),
+        CheckConstraint("reviewer_role = 'admin'", name="ck_ai_lesson_reviews_admin"),
+        CheckConstraint("length(btrim(reason)) >= 3", name="ck_ai_lesson_reviews_reason"),
+        Index("ix_ai_lesson_reviews_lesson", "lesson_id", text("id DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    lesson_id: Mapped[str] = mapped_column(ForeignKey("ai_lessons.id"))
+    status: Mapped[str] = mapped_column(String(10))
+    reviewer: Mapped[str] = mapped_column(String(64))
+    reviewer_role: Mapped[str] = mapped_column(String(10))
+    reason: Mapped[str] = mapped_column(Text)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ControlEventRow(Base):
     """Acoes de controle (ligar/desligar/pausar/reativar), append-only (trigger no banco)."""
 

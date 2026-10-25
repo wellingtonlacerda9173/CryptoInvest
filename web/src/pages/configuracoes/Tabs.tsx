@@ -4,6 +4,7 @@ import { GlossaryTerm } from '@/components/kit/GlossaryTerm';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Field, Input } from '@/components/ui/input';
+import { AiUsagePanel } from './AiUsagePanel';
 import { relPath } from './fieldModel';
 import { FieldControl } from './FieldControl';
 import { SectionShell } from './SectionShell';
@@ -241,10 +242,7 @@ export function AiTab(props: TabProps) {
   const editor = useSectionEditor({ section: 'ai', ...props });
   return (
     <SectionShell editor={editor}>
-      <p role="note" className="rounded-xl border border-info bg-info-bg px-3.5 py-2.5">
-        <strong>A IA só explica e resume.</strong> Ela comenta decisões e escreve o resumo do dia.
-        Nunca cria, altera ou cancela ordens e nunca muda limites de risco.
-      </p>
+      <AiUsagePanel />
       <Fields editor={editor} rels={['enabled', 'model']} />
     </SectionShell>
   );
