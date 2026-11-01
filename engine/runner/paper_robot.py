@@ -53,6 +53,7 @@ from engine.application.risk import (
     rolling_quote_volume,
 )
 from engine.application.risk.filters import RunMode, history_problem
+from engine.application.risk.regime_filter import RegimeEvidence, assess_regime
 from engine.application.selector import (
     SELECTOR_IDLE,
     SELECTOR_NO_SCORES,
@@ -255,6 +256,7 @@ class PaperRobot:
         self.max_runtime = max_runtime
         self.risk = config.risk
         self.context = StrategyContext(taker_fee_rate=self.risk.taker_fee_rate)
+        self._regimes: dict[str, RegimeEvidence] = {}
         self.gateway: PaperGateway
         self.state: RiskState
         self.stop_event = asyncio.Event()
@@ -1177,6 +1179,8 @@ class PaperRobot:
             if selected is None:
                 return []
             strategies, insight = selected
+        regime = self._regimes[symbol] = assess_regime(window, self.risk)
+        insight = {"regime": regime.plain_text, **(insight or {}), "regime_gate": regime.to_context()}
         found: list[StrategySignal] = []
         for strategy in strategies:
             if (signal := strategy.evaluate(window, self.context)) is not None:
@@ -2419,6 +2423,10 @@ class PaperRobot:
             "outbox_pending": self.journal.pending_events,
             "persistence_error": self.journal.last_error if self.journal.down else None,
             "ai": self._ai_payload(),
+            "market_regime": {
+                s: {"verdict": r.verdict.value, "text": r.plain_text, "reason": r.reason}
+                for s, r in self._regimes.items()
+            },
         }
 
     def _ai_payload(self) -> dict[str, Any]:

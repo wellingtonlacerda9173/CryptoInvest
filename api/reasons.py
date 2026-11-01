@@ -138,6 +138,21 @@ REASONS: Final[dict[str, Reason]] = {
     RejectionCode.PRICE_FILTER.value: Reason(
         "Não entrou", "O preço da ordem não respeita as regras de preço da corretora.", "refused"
     ),
+    RejectionCode.REGIME_DOWNTREND.value: Reason(
+        "Não entrou",
+        "O mercado está em queda. O robô nunca compra na queda: só entra quando o mercado está em alta.",
+        "refused",
+    ),
+    RejectionCode.REGIME_SIDEWAYS.value: Reason(
+        "Não entrou",
+        "O mercado está lateral (sem direção). O robô só entra quando o mercado está em alta.",
+        "refused",
+    ),
+    RejectionCode.REGIME_UNKNOWN.value: Reason(
+        "Não entrou",
+        "O robô não conseguiu confirmar que o mercado está em alta. Na dúvida, ele não entra.",
+        "refused",
+    ),
     "stops_blind": Reason(
         "Não entrou", "Sem dados de mercado: novas entradas pausadas. Stops seguem ativos.", "refused"
     ),

@@ -16,6 +16,7 @@ from engine.application.risk import (
     manage_position,
     open_position,
 )
+from engine.application.risk.regime_filter import RegimeEvidence, RegimeVerdict
 from engine.application.risk.sizing import net_reward_risk_ok
 from engine.application.strategies import ElephantBarBreakout, EmaCrossTrend, LevelsConfig, StrategyContext
 from engine.application.strategies.levels import compute_levels
@@ -30,6 +31,13 @@ CONFIG = RiskConfig()
 RULES = SymbolRules(
     symbol="BTC/USDT", tick_size=D("0.01"), step_size=D("0.001"), min_quantity=D("0.001"), min_notional=D(10)
 )
+
+
+@pytest.fixture(autouse=True)
+def _uptrend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Este arquivo cobre niveis/R:R liquido; o filtro de regime tem testes proprios (test_regime_filter)."""
+    evidence = RegimeEvidence(verdict=RegimeVerdict.UPTREND, reason="fixture")
+    monkeypatch.setattr("engine.application.risk.gate.assess_regime", lambda *_a, **_k: evidence)
 
 
 def _elephant() -> tuple[list[Candle], object, StrategyContext]:

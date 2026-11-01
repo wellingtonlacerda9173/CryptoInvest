@@ -58,22 +58,29 @@ def market(
     return MarketSnapshot(symbol=symbol, at=at, bid=D(bid), ask=D(ask), quote_volume_24h=D(volume))
 
 
-def history(count: int = 20, now: datetime = NOW, symbol: str = SYMBOL) -> list[Candle]:
+def history(count: int = 160, now: datetime = NOW, symbol: str = SYMBOL, drift: float = 0.2) -> list[Candle]:
+    """Velas H1 fechadas e contiguas; por padrao uma alta limpa (aprovada pelo filtro de regime) que termina
+    em 100: `drift` > 0 sobe, < 0 cai, 0 fica lateral (oscilando em canal)."""
     last_open = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
-    return [
-        Candle(
-            symbol=symbol,
-            timeframe=Timeframe.H1,
-            open_time=last_open - timedelta(hours=count - 1 - i),
-            open=D(100),
-            high=D(101),
-            low=D(99),
-            close=D(100),
-            volume=D(10),
-            closed=True,
+    candles: list[Candle] = []
+    for i in range(count):
+        back = count - 1 - i
+        wave = 0.0 if drift else 1.5 * (-1) ** i
+        mid = 100.0 - drift * back + wave
+        candles.append(
+            Candle(
+                symbol=symbol,
+                timeframe=Timeframe.H1,
+                open_time=last_open - timedelta(hours=back),
+                open=D(str(round(mid - drift / 2, 4))),
+                high=D(str(round(mid + 0.8, 4))),
+                low=D(str(round(mid - 0.8, 4))),
+                close=D(str(round(mid, 4))),
+                volume=D(10),
+                closed=True,
+            )
         )
-        for i in range(count)
-    ]
+    return candles
 
 
 def candle(open_: str, high: str, low: str, close: str, at: datetime = NOW) -> Candle:

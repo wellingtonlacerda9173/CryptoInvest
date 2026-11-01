@@ -26,6 +26,7 @@ from engine.application.risk.reconciliation import (
     pause_on_divergence,
     reconcile,
 )
+from engine.application.risk.regime_filter import RegimeEvidence, RegimeVerdict, assess_regime
 from engine.application.risk.rejections import Rejection, RejectionCode
 from engine.application.risk.sizing import PositionSize, SymbolRules, size_position
 from engine.application.risk.state import AuditAction, AuditEntry, RiskState
@@ -50,10 +51,13 @@ __all__ = [
     "PartialPlan",
     "PositionSize",
     "ProtectiveStop",
+    "RegimeEvidence",
+    "RegimeVerdict",
     "Rejection",
     "RejectionCode",
     "RiskState",
     "SymbolRules",
+    "assess_regime",
     "close_position",
     "emergency_trade",
     "evaluate_entry",

@@ -15,6 +15,11 @@ MAX_OPEN_POSITIONS = 2
 MAX_CONSECUTIVE_LOSSES = 2
 MIN_PAIR_PAUSE_HOURS = 24
 MAX_TOTAL_EXPOSURE = Decimal("0.8")
+# pisos do filtro de regime: a config so pode ser IGUAL ou MAIS rigida; nao existe chave para desliga-lo
+REGIME_ADX_FLOOR = 20.0
+REGIME_ER_FLOOR = 0.20
+REGIME_SLOPE_FLOOR = 0.02
+REGIME_RISE_FLOOR = 1.0
 
 Asset = Annotated[str, StringConstraints(pattern=r"^[A-Z0-9]{2,12}$")]
 
@@ -57,6 +62,14 @@ class RiskConfig(DomainModel):
     max_entry_deviation: StrictDecimal = Field(default=Decimal("0.005"), gt=0, le=Decimal("0.02"))
     max_quote_age_seconds: StrictInt = Field(default=30, ge=1, le=300)
     min_history_candles: StrictInt = Field(default=20, ge=2)
+    regime_adx_min: StrictDecimal = Field(default=Decimal(22), ge=Decimal(str(REGIME_ADX_FLOOR)), le=60)
+    regime_er_min: StrictDecimal = Field(default=Decimal("0.25"), ge=Decimal(str(REGIME_ER_FLOOR)), le=1)
+    regime_slope_min_atr: StrictDecimal = Field(
+        default=Decimal("0.03"), ge=Decimal(str(REGIME_SLOPE_FLOOR)), le=1
+    )
+    regime_rise_min_atr: StrictDecimal = Field(
+        default=Decimal("1.5"), ge=Decimal(str(REGIME_RISE_FLOOR)), le=20
+    )
 
     @model_validator(mode="after")
     def _check_consistency(self) -> Self:

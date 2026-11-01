@@ -2,6 +2,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
+from engine.application.risk.regime_filter import RegimeEvidence
 from engine.domain.base import DomainModel
 from engine.domain.decision import Decision, DecisionAction
 from engine.domain.signal import Signal
@@ -39,6 +40,9 @@ class RejectionCode(StrEnum):
     QUOTE_STALE = "quote_stale"
     MARKET_INCOHERENT = "market_incoherent"
     PRICE_FILTER = "price_filter"
+    REGIME_DOWNTREND = "regime_downtrend"
+    REGIME_SIDEWAYS = "regime_sideways"
+    REGIME_UNKNOWN = "regime_unknown"
 
 
 class Rejection(DomainModel):
@@ -46,6 +50,7 @@ class Rejection(DomainModel):
 
     code: RejectionCode
     message: str = Field(min_length=1)
+    regime: RegimeEvidence | None = None
 
     def to_decision(self, signal: Signal, decided_at: UtcDatetime) -> Decision:
         return Decision(

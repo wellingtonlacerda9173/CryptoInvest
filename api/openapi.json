@@ -1128,6 +1128,14 @@
           "live": {
             "$ref": "#/components/schemas/LiveEligibilityOut"
           },
+          "market_regime": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketRegimeOut"
+            },
+            "description": "Regime avaliado por par na última vela fechada.",
+            "title": "Market Regime",
+            "type": "object"
+          },
           "mode": {
             "enum": [
               "paper",
@@ -4281,6 +4289,37 @@
           "text"
         ],
         "title": "MarkerOut",
+        "type": "object"
+      },
+      "MarketRegimeOut": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "text": {
+            "description": "Frase para leigos: o robô só entra quando o mercado está em alta.",
+            "title": "Text",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "uptrend",
+              "downtrend",
+              "sideways",
+              "unknown"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "text",
+          "reason"
+        ],
+        "title": "MarketRegimeOut",
         "type": "object"
       },
       "MeOut": {

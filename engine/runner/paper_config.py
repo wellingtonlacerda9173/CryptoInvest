@@ -9,6 +9,7 @@ from typing import Self
 
 from pydantic import Field, model_validator
 
+from engine.application.risk.regime_filter import MIN_CANDLES
 from engine.application.selector import SelectorSettings
 from engine.application.trading_config.document import AiConfig
 from engine.domain.base import DomainModel
@@ -49,7 +50,7 @@ class PaperRunConfig(DomainModel):
     ai_min_confidence: float = Field(default=0.5, ge=0, le=1)
 
     allow_open_calendar: bool = False
-    history_window: int = Field(default=400, ge=60)
+    history_window: int = Field(default=400, ge=MIN_CANDLES)
     heartbeat_seconds: int = Field(default=30, gt=0)
     equity_seconds: int = Field(default=60, gt=0)
     reconcile_seconds: int = Field(default=300, gt=0)

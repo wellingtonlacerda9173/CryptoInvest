@@ -151,7 +151,10 @@ async def test_disabled_selector_ignores_the_score_store() -> None:
     await h.close(candle_at(29, *SIGNAL_CANDLE))
 
     assert h.journal.codes() == ["approved"]
-    assert (h.journal.decisions[0].insight) is None
+    assert set(h.journal.decisions[0].insight or {}) == {
+        "regime",
+        "regime_gate",
+    }  # so o regime do gate, sem seletor
 
 
 async def test_scores_are_recalculated_and_published_every_n_hours(monkeypatch: pytest.MonkeyPatch) -> None:

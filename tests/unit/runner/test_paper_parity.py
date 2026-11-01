@@ -9,6 +9,7 @@ from itertools import pairwise
 import pytest
 
 from engine.application.backtest import BacktestEngine
+from engine.application.risk.regime_filter import MIN_CANDLES
 from engine.application.strategies import ElephantBarBreakout, EmaCrossTrend, Strategy
 from engine.domain.candle import Candle
 from engine.domain.risk import RiskConfig
@@ -68,7 +69,7 @@ async def run_runner(
     strategies: Sequence[Strategy] | None = None,
     indexes: set[int] | None = None,
     scripted_levels: Callable[[Candle], tuple[str, str, str]] | None = None,
-    history_window: int = 60,
+    history_window: int = MIN_CANDLES,
 ) -> Harness:
     """Alimenta o runner vela a vela, como o motor do backtest: o book fecha na vela e abre na seguinte."""
     close = [candles[start].close]
@@ -109,7 +110,7 @@ async def run_both(
     indexes = set(range(START, 199, 5))
     result = await BacktestEngine(
         [Scripted(indexes, levels)],
-        settings(history_window=60, slippage_bps=D(0), risk=RISK),
+        settings(history_window=MIN_CANDLES, slippage_bps=D(0), risk=RISK),
         clock=lambda: FIXED_NOW,
     ).run(candles, start=START)
     h = await run_runner(candles, START, indexes=indexes, scripted_levels=levels)

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.container import Container
 from api.reasons import persistence_text
-from api.schemas_trading import BotStateName, BotStatusOut, PauseReasonOut
+from api.schemas_trading import BotStateName, BotStatusOut, MarketRegimeOut, PauseReasonOut
 from api.services.limits import build_limits, state_words
 from api.services.livegate import LiveGateService, eligibility_of
 from api.services.queries import as_float, latest_run, open_position_rows, pending_commands
@@ -150,7 +150,18 @@ class StatusService:
             live=eligibility_of(evaluation),
             limits=build_limits(view, risk, now),
             pending_commands=pending,
+            market_regime=_regimes(view),
         )
+
+
+def _regimes(view: dict[str, Any]) -> dict[str, MarketRegimeOut]:
+    raw = view.get("market_regime")
+    if not isinstance(raw, dict):
+        return {}
+    try:
+        return {str(s): MarketRegimeOut.model_validate(v) for s, v in raw.items()}
+    except ValueError:
+        return {}
 
 
 def _risk(view: dict[str, Any], fallback: RiskConfig | None) -> RiskConfig:

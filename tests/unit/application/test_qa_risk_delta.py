@@ -30,6 +30,10 @@ CASES: list[tuple[str, Any, Any, Any]] = [
     ("max_entry_deviation", "0.005", "0.01", "0.004"),
     ("max_quote_age_seconds", 30, 60, 10),
     ("min_history_candles", 20, 10, 50),
+    ("regime_adx_min", "22", "20", "25"),
+    ("regime_er_min", "0.25", "0.2", "0.3"),
+    ("regime_slope_min_atr", "0.03", "0.02", "0.05"),
+    ("regime_rise_min_atr", "1.5", "1", "2"),
     ("allowed_assets", ["BTC", "ETH"], [], ["BTC"]),
     ("blocked_assets", ["BNB", "DOGE"], ["BNB"], ["BNB", "DOGE", "XRP"]),
 ]

@@ -102,3 +102,10 @@ def migration_url(settings: Settings, db_ready: None) -> Iterator[URL]:
 def binance_reachable() -> None:
     if not _reachable("api.binance.com", 443):
         pytest.skip("api.binance.com inacessivel")
+
+
+@pytest.fixture(autouse=True)
+def _regime_uptrend(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Iterator[None]:
+    from tests.unit.regime_stub import stub_uptrend
+
+    yield from stub_uptrend(monkeypatch, request)

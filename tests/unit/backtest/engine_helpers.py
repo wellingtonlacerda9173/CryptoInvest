@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from engine.application.backtest import BacktestEngine, BacktestResult, BacktestSettings
+from engine.application.risk.regime_filter import MIN_CANDLES
 from engine.application.strategies import StrategyContext, StrategySignal
 from engine.domain.candle import Candle
 from engine.domain.risk import RiskConfig
@@ -80,7 +81,9 @@ class Scripted:
 def settings(**kw: object) -> BacktestSettings:
     risk_kw = {k: v for k, v in kw.items() if k in RiskConfig.model_fields}
     rest = {k: v for k, v in kw.items() if k not in RiskConfig.model_fields}
-    return BacktestSettings.model_validate({"history_window": 60, "risk": RiskConfig(**risk_kw), **rest})  # type: ignore[arg-type]
+    return BacktestSettings.model_validate(
+        {"history_window": MIN_CANDLES, "risk": RiskConfig(**risk_kw), **rest}
+    )  # type: ignore[arg-type]
 
 
 async def run(

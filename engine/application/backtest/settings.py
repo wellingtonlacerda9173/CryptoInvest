@@ -3,6 +3,7 @@ from decimal import Decimal
 from pydantic import Field
 
 from engine.application.risk import SymbolRules
+from engine.application.risk.regime_filter import MIN_CANDLES
 from engine.domain.base import DomainModel
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Fee, StrictDecimal, Volume
@@ -49,7 +50,7 @@ class BacktestSettings(DomainModel):
     slippage_bps: StrictDecimal = Field(default=Decimal(5), ge=0)
     latency_candles: int = Field(default=1, ge=1)
     risk: RiskConfig = RiskConfig()
-    history_window: int = Field(default=400, ge=60)
+    history_window: int = Field(default=400, ge=MIN_CANDLES)
     hypothetical_horizon: int = Field(default=72, ge=1)
     drawdown_halt: bool = True
 

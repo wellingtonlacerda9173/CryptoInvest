@@ -16,7 +16,7 @@ from engine.domain.risk import RiskConfig
 from tests.unit.application.helpers import build_candles, candle_row, wave_rows
 from tests.unit.application.strategy_series import CASES, CTX, FEE, Case
 from tests.unit.application.test_strategies import assert_valid, future_candles, remove_candle
-from tests.unit.risk.test_strategy_gate_integration import _approve
+from tests.unit.risk.test_strategy_gate_integration import _approve, _uptrend  # noqa: F401
 
 IDS = [case.id for case in CASES]
 CASE_PARAMS = pytest.param

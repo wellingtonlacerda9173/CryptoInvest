@@ -16,6 +16,7 @@ from engine.application.backtest import (
     summarize_avoided,
 )
 from engine.application.backtest.models import DecisionAction
+from engine.application.risk.regime_filter import MIN_CANDLES
 from engine.domain.candle import Candle
 from engine.domain.signal import Signal
 from engine.domain.trade import ExitReason
@@ -73,7 +74,7 @@ async def _run(seed: int, latency: int) -> BacktestResult:
     candles = _random_walk(seed, 400)
     strategy = Scripted(set(range(31, 430, 3)), _levels)
     engine = BacktestEngine(
-        [strategy], settings(latency_candles=latency, history_window=60), clock=lambda: FIXED_NOW
+        [strategy], settings(latency_candles=latency, history_window=MIN_CANDLES), clock=lambda: FIXED_NOW
     )
     return await engine.run(candles)
 

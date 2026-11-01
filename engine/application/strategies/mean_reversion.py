@@ -1,3 +1,8 @@
+"""Reversao a media (compra de queda/lateral). O filtro de regime OBRIGATORIO do gate so deixa entrar em
+tendencia de alta confirmada; quase todo sinal desta estrategia vira 'nao entrou: mercado em queda/lateral'.
+Fica registrada para estudo (backtest/seletor), mas na pratica inerte.
+"""
+
 from collections.abc import Sequence
 
 from pydantic import Field

@@ -12,6 +12,7 @@ from engine.application.risk.filters import (
     history_problem,
 )
 from engine.application.risk.position import EmergencyExit, ManagedPosition
+from engine.application.risk.regime_filter import RegimeEvidence, RegimeVerdict, assess_regime
 from engine.application.risk.rejections import Rejection, RejectionCode
 from engine.application.risk.sizing import (
     SymbolRules,
@@ -110,6 +111,19 @@ def _coherence_problem(signal: Signal, market: MarketSnapshot, config: RiskConfi
     return None
 
 
+_REGIME_CODES = {
+    RegimeVerdict.DOWNTREND: RejectionCode.REGIME_DOWNTREND,
+    RegimeVerdict.SIDEWAYS: RejectionCode.REGIME_SIDEWAYS,
+    RegimeVerdict.UNKNOWN: RejectionCode.REGIME_UNKNOWN,
+}
+
+
+def _regime_problem(evidence: RegimeEvidence) -> Rejection | None:
+    if evidence.allows_entry:
+        return None
+    return Rejection(code=_REGIME_CODES[evidence.verdict], message=evidence.reason, regime=evidence)
+
+
 def evaluate_entry(
     signal: Signal,
     *,
@@ -143,6 +157,9 @@ def evaluate_entry(
         return blocked
     if problem := history_problem(history, signal.symbol, signal.timeframe, now, config.min_history_candles):
         return _reject(RejectionCode.HISTORY_GAP, problem)
+    regime = assess_regime(history, config)
+    if (blocked := _regime_problem(regime)) is not None:
+        return blocked
     if (blocked := check_market(market, calendar, config, now, mode=mode)) is not None:
         return blocked
     if (blocked := _coherence_problem(signal, market, config)) is not None:
@@ -219,7 +236,7 @@ def evaluate_entry(
         min_quantity=rules.min_quantity,
         min_notional=rules.min_notional,
     )
-    return ApprovedEntry(order, signal, sized.risk_amount, guards=guards, _issuer=_ISSUER)
+    return ApprovedEntry(order, signal, sized.risk_amount, guards=guards, regime=regime, _issuer=_ISSUER)
 
 
 def expire_pending(

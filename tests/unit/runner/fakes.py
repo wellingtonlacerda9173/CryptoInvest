@@ -9,6 +9,7 @@ from typing import Any
 
 from engine.application.backtest.models import EquityPoint
 from engine.application.risk import EventCalendar, ManagedPosition, RiskState
+from engine.application.risk.regime_filter import MIN_CANDLES
 from engine.application.risk.sizing import SymbolRules
 from engine.application.strategies import Strategy
 from engine.domain.candle import Candle
@@ -397,7 +398,7 @@ def config(**overrides: Any) -> PaperRunConfig:
         "slippage_bps": D(0),
         "latency_ms": 0,
         "allow_open_calendar": True,
-        "history_window": 60,
+        "history_window": MIN_CANDLES,
         "risk": RiskConfig(),
     }
     return PaperRunConfig.model_validate(values | overrides)

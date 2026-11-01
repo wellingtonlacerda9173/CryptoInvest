@@ -85,4 +85,5 @@ markers = [
     "slow: calibracao estatistica com muitos sorteios (dezenas de segundos)",
     "deploy: validacao estatica de Dockerfiles, stack, .dockerignore e scripts (sem rede e sem Docker)",
     "docker: build e smoke das imagens (requer Docker; pulavel se indisponivel)",
+    "real_regime: desliga o stub autouse e usa o avaliador de regime real (backtest/runner)",
 ]

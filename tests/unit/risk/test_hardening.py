@@ -429,9 +429,10 @@ class TestHistory:
         assert history_problem(history(20, now=NOW + timedelta(hours=1)), SYMBOL, Timeframe.H1, NOW, 20)
 
     def test_min_history_is_configurable(self) -> None:
-        cfg = RiskConfig(min_history_candles=3, taker_fee_rate=D(0))
+        cfg = RiskConfig(min_history_candles=160, taker_fee_rate=D(0))
 
-        assert isinstance(approve(config=cfg, history=history(3)), ApprovedEntry)
+        assert isinstance(approve(config=cfg, history=history(160)), ApprovedEntry)
+        assert code_of(approve(config=cfg, history=history(159))) is RejectionCode.HISTORY_GAP
 
 
 class TestManagementGuards:

@@ -47,6 +47,12 @@ class LiveEligibilityOut(Out):
     live_available: bool = Field(description="Falso nesta fase: o Live ainda não pode ser ativado.")
 
 
+class MarketRegimeOut(Out):
+    verdict: Literal["uptrend", "downtrend", "sideways", "unknown"]
+    text: str = Field(description="Frase para leigos: o robô só entra quando o mercado está em alta.")
+    reason: str
+
+
 class BotStatusOut(Out):
     run_id: str | None
     mode: Mode
@@ -86,6 +92,9 @@ class BotStatusOut(Out):
     live: LiveEligibilityOut
     limits: list[RiskLimitOut]
     pending_commands: int = Field(description="Comandos do painel ainda sem entrega ao robô.")
+    market_regime: dict[str, MarketRegimeOut] = Field(
+        default_factory=dict, description="Regime avaliado por par na última vela fechada."
+    )
 
 
 class AccountSummaryOut(Out):

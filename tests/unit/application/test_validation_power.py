@@ -8,7 +8,7 @@ estrategia opera um passeio aleatorio puro (nulo).
 
 import random
 import statistics
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import NamedTuple
@@ -30,6 +30,7 @@ from engine.application.validation.models import ValidationReport
 from engine.domain.candle import Candle
 from engine.domain.signal import Signal
 from engine.domain.types import Timeframe
+from tests.unit.regime_stub import stub_uptrend
 
 START = datetime(2025, 1, 1, tzinfo=UTC)
 PER_DAY = 6
@@ -139,6 +140,12 @@ async def sweep(p: float | None, seeds: range) -> Cell:
         trades=statistics.mean(e.stats.trades for e in reports),
         edge=statistics.mean(edges),
     )
+
+
+@pytest.fixture(autouse=True)
+def _regime_uptrend(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Iterator[None]:
+    """Estuda o poder do validador com sinais sinteticos; o filtro de regime tem testes proprios."""
+    yield from stub_uptrend(monkeypatch, request)
 
 
 @pytest.mark.slow

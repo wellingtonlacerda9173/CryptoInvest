@@ -7,6 +7,7 @@ from typing import Final, Self
 
 from pydantic import model_validator
 
+from engine.application.risk.regime_filter import RegimeEvidence
 from engine.domain.base import DomainModel
 from engine.domain.decision import Decision, DecisionAction
 from engine.domain.order import EntryOrder
@@ -45,9 +46,17 @@ class FillGuards(DomainModel):
         return self
 
 
-def _seal(order: EntryOrder, signal: Signal, risk_amount: Decimal, guards: FillGuards) -> bytes:
-    payload = "".join(
-        (order.model_dump_json(), signal.model_dump_json(), str(risk_amount), guards.model_dump_json())
+def _seal(
+    order: EntryOrder, signal: Signal, risk_amount: Decimal, guards: FillGuards, regime: RegimeEvidence
+) -> bytes:
+    payload = "".join(
+        (
+            order.model_dump_json(),
+            signal.model_dump_json(),
+            str(risk_amount),
+            guards.model_dump_json(),
+            regime.model_dump_json(),
+        )
     )
     return hmac.new(_KEY, payload.encode(), hashlib.sha256).digest()
 
@@ -60,12 +69,13 @@ class ApprovedEntry:
     (ou `verify_approval`) imediatamente antes de enviar a ordem e recusar qualquer excecao `ApprovalError`.
     """
 
-    __slots__ = ("_seal", "guards", "order", "risk_amount", "signal")
+    __slots__ = ("_seal", "guards", "order", "regime", "risk_amount", "signal")
 
     order: EntryOrder
     signal: Signal
     risk_amount: Decimal
     guards: FillGuards
+    regime: RegimeEvidence
 
     def __init__(
         self,
@@ -74,15 +84,17 @@ class ApprovedEntry:
         risk_amount: Decimal,
         *,
         guards: FillGuards | None = None,
+        regime: RegimeEvidence | None = None,
         _issuer: object = None,
     ) -> None:
-        if _issuer is not _ISSUER or guards is None:
-            raise TypeError("ApprovedEntry can only be issued by the risk gate")
+        if _issuer is not _ISSUER or guards is None or regime is None or not regime.allows_entry:
+            raise TypeError("ApprovedEntry can only be issued by the risk gate, in a confirmed uptrend")
         object.__setattr__(self, "order", order)
         object.__setattr__(self, "signal", signal)
         object.__setattr__(self, "risk_amount", risk_amount)
         object.__setattr__(self, "guards", guards)
-        object.__setattr__(self, "_seal", _seal(order, signal, risk_amount, guards))
+        object.__setattr__(self, "regime", regime)
+        object.__setattr__(self, "_seal", _seal(order, signal, risk_amount, guards, regime))
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("ApprovedEntry is immutable")
@@ -93,7 +105,7 @@ class ApprovedEntry:
     def verify(self) -> Self:
         try:
             seal: bytes = object.__getattribute__(self, "_seal")
-            expected = _seal(self.order, self.signal, self.risk_amount, self.guards)
+            expected = _seal(self.order, self.signal, self.risk_amount, self.guards, self.regime)
             valid = hmac.compare_digest(seal, expected)
         except (AttributeError, TypeError, ValueError) as error:
             raise ApprovalError("approval is not authentic") from error
