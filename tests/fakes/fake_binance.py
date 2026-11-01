@@ -177,7 +177,10 @@ class FakeBinance:
         return [
             o
             for o in self.orders.values()
-            if o.symbol == symbol and o.side == "SELL" and o.stop > 0 and o.status == "NEW"
+            if o.symbol == symbol
+            and o.side == "SELL"
+            and o.stop > 0
+            and o.status in ("NEW", "PARTIALLY_FILLED")
         ]
 
     def uncovered_base(self, asset: str = "BTC", symbol: str = "BTCUSDT") -> D:
@@ -392,7 +395,9 @@ class FakeBinance:
 
     def _open_orders(self, params: dict[str, str]) -> list[dict[str, Any]]:
         return [
-            self._view(o) for o in self.orders.values() if o.symbol == params["symbol"] and o.status == "NEW"
+            self._view(o)
+            for o in self.orders.values()
+            if o.symbol == params["symbol"] and o.status in ("NEW", "PARTIALLY_FILLED")
         ]
 
     # ---- ordens ---------------------------------------------------------------------------------
@@ -648,9 +653,24 @@ class FakeBinance:
             order.locked_quote = _ZERO
         if order.side == "SELL" and order.locked_base > 0:
             asset = order.symbol.removesuffix("USDT")
-            self.balances[asset][1] -= remaining
-            self.balances[asset][0] += remaining
+            amount = min(remaining, order.locked_base)
+            self.balances[asset][1] -= amount
+            self.balances[asset][0] += amount
             order.locked_base = _ZERO
+
+    def _lock_holder(self, order: FOrder) -> FOrder | None:
+        """Numa OCO o saldo fica registrado na perna `above`: a perna `below` executada o consome de la."""
+        listing = self.lists.get(order.list_id)
+        if listing is None:
+            return None
+        return next(
+            (
+                o
+                for o in (self.orders[i] for i in listing.order_ids)
+                if o.id != order.id and o.locked_base > 0
+            ),
+            None,
+        )
 
     def _fill(self, order: FOrder, qty: D, price: D, *, maker: bool) -> None:
         base = order.symbol.removesuffix("USDT")
@@ -667,6 +687,9 @@ class FakeBinance:
             )
         else:
             self.balances[base][1] -= qty
+            holder = order if order.locked_base > 0 else self._lock_holder(order)
+            if holder is not None:
+                holder.locked_base = max(_ZERO, holder.locked_base - qty)
             fee = qty * price * self.commission_rate
             self.balances["USDT"][0] += qty * price - fee
             commission, asset = fee, "USDT"
@@ -729,13 +752,10 @@ class FakeBinance:
             elif order.type == "LIMIT_MAKER" and order.status == "NEW" and price >= order.price:
                 self._fill(order, order.qty, order.price, maker=True)
                 self._after_fill(order)
-            elif (order.type == "STOP_LOSS" and order.status == "NEW" and price <= order.stop) or (
-                order.type == "STOP_LOSS_LIMIT"
-                and order.status == "NEW"
-                and price <= order.stop
-                and price >= order.price
+            elif (order.type == "STOP_LOSS" and price <= order.stop) or (
+                order.type == "STOP_LOSS_LIMIT" and price <= order.stop and price >= order.price
             ):
-                self._fill(order, order.qty, price, maker=False)
+                self._fill(order, order.qty - order.executed, price, maker=False)
                 self._after_fill(order)
 
 

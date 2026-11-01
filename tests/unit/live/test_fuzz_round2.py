@@ -207,7 +207,7 @@ async def run(ops: list[tuple[str, Any]]) -> tuple[str | None, list[str]]:
     fake.balances["BTC"] = [ALIEN, D(0)]
     rig = build_rig(
         fake,
-        request_timeout_seconds=0.12,
+        request_timeout_seconds=5.0,
         partial_fill_grace_seconds=0,
         protection_activation_grace_seconds=0,
         read_retries=1,

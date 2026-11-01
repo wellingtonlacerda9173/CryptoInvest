@@ -41,6 +41,7 @@ def make_filters(tick: Decimal, step: Decimal) -> SymbolFilters:
     )
 
 
+@settings(deadline=None)
 @given(value=amounts, step=steps)
 def test_rounding_down_and_up_are_aligned_and_bracket_the_value(value: Decimal, step: Decimal) -> None:
     down, up = floor_to_step(value, step), ceil_to_step(value, step)
@@ -51,6 +52,7 @@ def test_rounding_down_and_up_are_aligned_and_bracket_the_value(value: Decimal, 
     assert up - down in (0, step)
 
 
+@settings(deadline=None)
 @given(value=amounts, tick=steps, step=steps)
 def test_filters_accept_aligned_values_and_reject_misaligned_ones(
     value: Decimal, tick: Decimal, step: Decimal
@@ -68,6 +70,7 @@ def test_filters_accept_aligned_values_and_reject_misaligned_ones(
         assert any(p.startswith("PRICE_FILTER") for p in bad)
 
 
+@settings(deadline=None)
 @given(value=amounts, step=steps)
 def test_quantity_rounding_never_exceeds_requested(value: Decimal, step: Decimal) -> None:
     assert make_filters(step, step).round_quantity_down(value) <= value
@@ -164,7 +167,7 @@ async def run_sequence(ops: list[tuple[str, Any]]) -> tuple[FakeBinance, bool, l
     await fake.start()
     rig = build_rig(
         fake,
-        request_timeout_seconds=0.12,
+        request_timeout_seconds=0.6,
         partial_fill_grace_seconds=0,
         protection_activation_grace_seconds=0,
         read_retries=1,

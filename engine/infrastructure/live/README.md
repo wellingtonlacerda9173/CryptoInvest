@@ -49,6 +49,16 @@ nesta fase. Nunca foi chamado contra a Binance real: os testes usam a Binance FA
 - `raise_stop`: so sobe, abaixo do alvo e do bid corrente (margem `min_stop_distance_bps`); cancel+replace da OCO
   (nao existe substituicao atomica de order list) e, se o replace falhar apos retries, venda a mercado.
   **Risco residual**: entre o DELETE e o novo POST (2 requisicoes) a posicao fica sem stop na corretora.
+  Mitigacao: `on_intent` entrega um `ProtectionIntent` (write-ahead, ANTES do DELETE; sink que falha aborta o
+  cancel). O chamador persiste `generation`/`stop_loss`/`target_dropped` em `PersistedEntry`; sem isso o `recover`
+  reprotege no stop mais alto que chegou a existir na corretora (nunca sem protecao, mas possivelmente mais baixo).
+- Perna de stop `PARTIALLY_FILLED` e protecao VIVA (adotada com o restante `origQty - executedQty`; o executado vai
+  ao ledger). `recover` sonda geracoes para cima enquanto achar ordens (geracao persistida pode estar atrasada).
+  `/myTrades` e lido paginado (`startTime` na 1a pagina, `fromId` nas demais; o `reconcile` guarda um cursor
+  `fromId` por simbolo e nao relê o historico a cada ciclo). Venda alheia na conta: NUNCA e abatida do `owed`; em
+  duvida a entrada fica `exposed` + pausa + alerta, a protecao viva permanece intacta e o operador libera com os
+  ids confirmados. Sem protecao viva, o `poll` reprotege so a parte provavelmente propria
+  (`min(owed - pendente, saldo livre)`) e mantem o alerta critico `POSICAO PROPRIA DESPROTEGIDA`.
 - Nenhum caminho cancela protecao fora de raise_stop/drop_target (com recolocacao imediata), saida executada e
   emergencia; `cancel_order` de `<id>:oco`/ids protetivos e recusado.
 - Saidas: MARKET ou LIMIT IOC (nunca ordem ociosa sem stop); a protecao e cancelada so para vender e recolocada
@@ -115,3 +125,32 @@ afirmados por testes com relogio logico.
 
 Documentacao Binance consultada: Spot API REST `trading-endpoints` (OPOCO/OTOCO/OCO, Cancel Order list, Query
 Order list) e `faqs/opo.md` (quantidade das pernas liquida de comissao; apenas BUY de trabalho e SELL pendente).
+
+## Venda alheia, paginacao e o que a fake NAO prova
+
+- Venda na conta apos o fill de ENTRY de uma entrada que nenhuma ordem conhecida explica (calculada POR entrada,
+  so trades posteriores ao fill dela): nao ha como provar de qual posicao saiu. O `recover` NUNCA abate isso do
+  `owed`: a entrada fica `exposed`, gateway PAUSADO + alerta critico; a protecao viva existente permanece intacta
+  e nada alheio e vendido. O operador libera informando `PersistedEntry.acknowledged_trade_ids` (ids dos trades
+  confirmados como alheios, mais `acknowledged_by`; vale so para esses ids, um trade novo volta a pausar) ou as
+  saidas em `exit_client_ids`. Ids de trade da Binance sao POR SIMBOLO: a confirmacao vale como `(simbolo, id)`
+  e nunca esconde um trade de mesmo id em outro simbolo (`ReconciliationResult.unknown_trade_refs`).
+- Cursor do `reconcile` e conjunto de trades desconhecidos vivem SO em memoria: o reinicio zera o cursor (a
+  proxima conciliacao le de novo desde o start do processo; a recuperacao por entrada continua vendo os trades).
+  O conjunto e limitado a 10000 ids por simbolo (descarta os mais antigos, com log `live_unknown_trades_trimmed`).
+- Residuo proprio: se a protecao encerra (ex.: OCO parcial dispara) e sobra saldo atras de venda sem dono
+  pendente, a entrada NAO fecha: fica `exposed`, gateway pausado e novo alerta critico com o residuo.
+- Toda geracao nova de protecao e anunciada (`on_intent`, write-ahead) tambem fora de `raise_stop`/`drop_target`;
+  falha do sink nesse caminho so e registrada (proteger vem antes).
+- `/myTrades` sem `orderId`: `limit=1000`, pagina so enquanto a pagina vier cheia (sem requisicao extra), teto
+  de 25 paginas (peso 20 cada). No `recover` o estouro deixa a entrada `exposed`; no `reconcile` o resultado
+  fica `inconclusive` (nao `ok`) com pausa + alerta, sem derrubar a conciliacao.
+- Geracoes: `PersistedEntry.generation` (alimentada por `ProtectionIntent.persisted`) e o piso da sondagem;
+  levanta `ProtectionError` so se `generation + 3 > 2000`.
+
+### Suposicoes da fake, NAO verificadas (confirmar em testnet antes de qualquer uso com dinheiro)
+
+- Comportamento real de `PARTIALLY_FILLED` em pernas de OCO (perna de stop viva com restante travado, e o
+  restante da outra perna).
+- `executedQty` vs comissao em base asset e `cummulativeQuoteQty` (liquido ou bruto de comissao).
+- `fromId` / `startTime` / `limit` de `/myTrades`: exclusividade, ordenacao por id, limite maximo e peso.

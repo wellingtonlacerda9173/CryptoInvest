@@ -1,10 +1,11 @@
 # ruff: noqa: E501
 """5a revisao QA do 7B-1 (recover/close_orphan/_fresh_owed). Somente a fake local.
 
-Testes `xfail(strict=True)` com prefixo `BUG:` sao EVIDENCIA de defeitos reais da 5a rodada.
+Os defeitos da 5a rodada (antes `xfail(strict=True)` com prefixo `BUG:`) foram corrigidos; seguem como regressao.
 """
 
 import asyncio
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -13,8 +14,9 @@ import pytest
 from engine.domain.order import ExitOrder, OrderType
 from engine.domain.risk import RiskConfig
 from engine.infrastructure.live.client import BinanceRestClient
-from engine.infrastructure.live.gateway import LiveGateway
-from engine.infrastructure.live.recovery import PersistedEntry
+from engine.infrastructure.live.errors import LiveError
+from engine.infrastructure.live.gateway import LiveGateway, derived_id
+from engine.infrastructure.live.recovery import PersistedEntry, ProtectionIntent
 from tests.fakes.fake_binance import ApiError, FakeBinance, Req
 from tests.unit.live.support import (
     NOW,
@@ -83,10 +85,7 @@ def reuse_closed_ids(fake: FakeBinance) -> None:
 # ---- recover: geracao de protecao atrasada (stop de arrasto) ---------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: recover so sonda ate generation+2; trailing stop gera mais geracoes"
-)
-async def test_bug_restart_after_trailing_stop_raises_adopts_the_latest_protection_with_a_stale_generation(
+async def test_restart_after_trailing_stop_raises_adopts_the_latest_protection_with_a_stale_generation(
     fake: FakeBinance,
 ) -> None:
     fake.balances["BTC"] = [D(5), D(0)]
@@ -152,8 +151,8 @@ async def test_recover_does_not_dump_a_protectable_position_because_its_own_read
 # ---- myTrades paginado ---------------------------------------------------------------------------------
 
 
-def paginate_my_trades(fake: FakeBinance, limit: int = 500) -> None:
-    """Emula a Binance: sem orderId, ate `limit` trades por chamada (ordenados por id), `fromId` pagina."""
+def paginate_my_trades(fake: FakeBinance, limit: int = 1000) -> None:
+    """Emula a Binance: sem orderId, ate min(`limit`, parametro limit) trades por chamada (por id), `fromId` pagina."""
     original = fake._my_trades
 
     def paged(params: dict[str, str]) -> list[dict[str, Any]]:
@@ -163,7 +162,7 @@ def paginate_my_trades(fake: FakeBinance, limit: int = 500) -> None:
         found = sorted(found, key=lambda t: int(t["id"]))
         if "fromId" in params:
             found = [t for t in found if int(t["id"]) >= int(params["fromId"])]
-        return found[:limit]
+        return found[: min(limit, int(params.get("limit", limit)))]
 
     fake._my_trades = paged  # type: ignore[method-assign]
 
@@ -184,15 +183,15 @@ def extra_trade(trade_id: int, qty: str, *, buyer: bool, at_ms: int) -> dict[str
     }
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: _check_unattributed_sells le so a 1a pagina de /myTrades (limite 500)"
-)
-async def test_bug_unattributed_sale_beyond_the_first_mytrades_page_is_detected(fake: FakeBinance) -> None:
+@pytest.mark.parametrize("alien_trades", [600, 1100])
+async def test_unattributed_sale_beyond_the_first_mytrades_page_is_detected(
+    fake: FakeBinance, alien_trades: int
+) -> None:
     fake.balances["BTC"] = [D(5), D(0)]
     first = await protected_then_down(fake)
-    paginate_my_trades(fake, 500)
+    paginate_my_trades(fake, 1000)
     base = fake.trades[-1]["time"]
-    for i in range(600):  # trades de OUTRO uso da conta depois da compra do robo
+    for i in range(alien_trades):  # trades de OUTRO uso da conta depois da compra do robo
         fake.trades.append(extra_trade(10_000 + i, "0.001", buyer=True, at_ms=base + 1 + i))
     fake.trades.append(extra_trade(20_000, "4", buyer=False, at_ms=base + 1000))
     second = await restart(first)
@@ -557,8 +556,6 @@ async def test_process_death_at_every_request_then_recover_never_leaves_an_unpro
 
 async def partially_filled_stop_leg(fake: FakeBinance, rig: Rig) -> None:
     """Compra enche, OPOCO ativa; o stop executa 4 de 10 e as 6 restantes seguem vivas (travadas)."""
-    from engine.infrastructure.live.gateway import derived_id
-
     await rig.gateway.place_order(approved_entry())
     fake.set_price("BTCUSDT", D(99))
     stop_leg = next(o for o in fake.orders.values() if o.cid == derived_id("e-1", "S0"))
@@ -566,11 +563,7 @@ async def partially_filled_stop_leg(fake: FakeBinance, rig: Rig) -> None:
     assert stop_leg.status == "PARTIALLY_FILLED" and fake.locked("BTC") == D(6)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: perna de stop PARTIALLY_FILLED nao e tratada como viva: poll recoloca OCO sobre saldo ALHEIO",
-)
-async def test_bug_poll_with_a_partially_filled_stop_leg_does_not_lock_foreign_balance(
+async def test_poll_with_a_partially_filled_stop_leg_does_not_lock_foreign_balance(
     fake: FakeBinance,
 ) -> None:
     fake.balances["BTC"] = [D(5), D(0)]
@@ -587,10 +580,7 @@ async def test_bug_poll_with_a_partially_filled_stop_leg_does_not_lock_foreign_b
         await rig.client.aclose()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG: saida apos perna de stop PARTIALLY_FILLED vende saldo ALHEIO (clamp usa free)"
-)
-async def test_bug_exit_with_a_partially_filled_stop_leg_does_not_sell_foreign_balance(
+async def test_exit_with_a_partially_filled_stop_leg_does_not_sell_foreign_balance(
     fake: FakeBinance,
 ) -> None:
     fake.balances["BTC"] = [D(5), D(0)]
@@ -627,11 +617,37 @@ async def test_recover_with_a_partially_filled_stop_leg_keeps_foreign_balance_fr
 # ---- stop de arrasto perdido na janela do replace: recover reprotege com o stop ORIGINAL -----------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: PersistedEntry nao leva o stop vigente; reinicio entre DELETE e POST do raise_stop rebaixa o stop",
-)
-async def test_bug_restart_between_cancel_and_post_of_raise_stop_does_not_lower_the_stop(
+async def test_restart_between_cancel_and_post_of_raise_stop_does_not_lower_the_stop(
+    fake: FakeBinance,
+) -> None:
+    intents: list[ProtectionIntent] = []
+    first = build_rig(fake, on_intent=intents.append)
+    await first.gateway.place_order(approved_entry())
+    fake.set_price("BTCUSDT", D(99))
+    await first.gateway.poll()
+    fake.set_price("BTCUSDT", D(103))
+    original = first.client.request
+
+    async def dies_on_oco_post(m: str, p: str, *a: Any, **k: Any) -> Any:
+        if (m, p) == ("POST", "/api/v3/orderList/oco"):
+            raise Kill
+        return await original(m, p, *a, **k)
+
+    first.client.request = dies_on_oco_post  # type: ignore[method-assign]
+    await settle(lambda: first.gateway.raise_stop("e-1", D(100)))
+    assert covered(fake) == 0
+    assert [(i.stop_loss, i.generation) for i in intents] == [(D(100), 1)]
+    second = await restart(first)
+    try:
+        await second.gateway.recover([intents[-1].persisted(persisted())])
+
+        stops = [o.stop for o in fake.active_stops()]
+        assert stops and min(stops) >= D(100), f"stop rebaixado para {stops} (devia ser >= 100)"
+    finally:
+        await second.client.aclose()
+
+
+async def test_restart_between_cancel_and_post_without_a_persisted_intent_reprotects_at_the_last_exchange_stop(
     fake: FakeBinance,
 ) -> None:
     first = await protected_then_down(fake)
@@ -643,30 +659,46 @@ async def test_bug_restart_between_cancel_and_post_of_raise_stop_does_not_lower_
         return await original(m, p, *a, **k)
 
     first.client.request = dies_on_oco_post  # type: ignore[method-assign]
-    await settle(
-        lambda: first.gateway.raise_stop("e-1", D(100))
-    )  # DELETE executou; o novo OCO (stop 100) nao saiu
-    assert covered(fake) == 0
+    await settle(lambda: first.gateway.raise_stop("e-1", D(100)))
     second = await restart(first)
     try:
-        await second.gateway.recover([persisted()])
+        result = await second.gateway.recover([persisted()])
 
-        stops = [o.stop for o in fake.active_stops()]
-        assert stops and min(stops) >= D(100), (
-            f"stop rebaixado para {stops} apos o reinicio (devia ser >= 100)"
-        )
+        assert [r.outcome for r in result.entries] == ["reprotected"], result
+        assert covered(fake) == D(10)
+        assert [o.stop for o in fake.active_stops()] == [D(95)]
     finally:
         await second.client.aclose()
+
+
+async def test_a_failing_intent_sink_aborts_raise_stop_before_cancelling_the_protection(
+    fake: FakeBinance,
+) -> None:
+    def broken(_: ProtectionIntent) -> None:
+        raise OSError("disco cheio")
+
+    rig = build_rig(fake, on_intent=broken)
+    try:
+        await rig.gateway.place_order(approved_entry())
+        fake.set_price("BTCUSDT", D(99))
+        await rig.gateway.poll()
+        fake.set_price("BTCUSDT", D(103))
+        fake.reset_log()
+
+        with pytest.raises(LiveError):
+            await rig.gateway.raise_stop("e-1", D(100))
+
+        assert fake.writes() == []
+        assert covered(fake) == D(10)
+        assert rig.gateway.entry_state("e-1") == "protected"
+    finally:
+        await rig.client.aclose()
 
 
 # ---- venda manual alheia com a protecao do robo VIVA: beco sem saida operacional ---------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG: venda manual alheia + OCO viva => recover nao adota (exposed) e close_orphan recusa: sem saida",
-)
-async def test_bug_unrelated_manual_sale_does_not_strand_a_position_that_is_protected_on_the_exchange(
+async def test_unrelated_manual_sale_pauses_until_the_operator_confirms_it_and_never_strands_the_position(
     fake: FakeBinance,
 ) -> None:
     fake.balances["BTC"] = [D(5), D(0)]
@@ -683,7 +715,17 @@ async def test_bug_unrelated_manual_sale_does_not_strand_a_position_that_is_prot
     second = await restart(first)
     try:
         result = await second.gateway.recover([persisted()])
-
-        assert [r.outcome for r in result.entries] == ["protected"], result
+        assert [r.outcome for r in result.entries] == ["exposed"], result
+        assert covered(fake) == D(10) and second.gateway.halted
     finally:
         await second.client.aclose()
+    third = await restart(second)
+    try:
+        ids = tuple(int(t["id"]) for t in fake.trades if not t["isBuyer"])
+        confirmed = replace(persisted(), acknowledged_trade_ids=ids, acknowledged_by="ana")
+        result = await third.gateway.recover([confirmed])
+
+        assert [r.outcome for r in result.entries] == ["protected"], result
+        assert covered(fake) == D(10)
+    finally:
+        await third.client.aclose()

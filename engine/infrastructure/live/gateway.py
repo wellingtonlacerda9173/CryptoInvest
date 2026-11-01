@@ -50,6 +50,7 @@ from engine.infrastructure.live.errors import (
     OutcomeUnknownError,
     ProtectionError,
     ProtectiveOrderCancelError,
+    TradeHistoryTooLongError,
     TradingHaltedError,
     UnattributedSalesError,
 )
@@ -59,6 +60,7 @@ from engine.infrastructure.live.recovery import (
     OperatorConfirmation,
     OrphanCloseResult,
     PersistedEntry,
+    ProtectionIntent,
     RecoveredEntry,
     RecoveryOutcome,
     RecoveryResult,
@@ -85,7 +87,12 @@ _STATUS = {
     "EXPIRED": OrderStatus.EXPIRED,
     "EXPIRED_IN_MATCH": OrderStatus.EXPIRED,
 }
-_GENERATION_LOOKAHEAD = 2
+_GENERATION_LOOKAHEAD = 3
+_MAX_GENERATIONS = 2_000
+_MAX_TRADE_PAGES = 25
+_MAX_UNKNOWN_TRADES = 10_000
+_TRADE_PAGE_LIMIT = 1000
+_LIVE = frozenset({"NEW", "PARTIALLY_FILLED"})
 _MAX_EMERGENCY_PROBES = 200
 _DONE = frozenset({"FILLED", "CANCELED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"})
 
@@ -139,6 +146,12 @@ class _Entry:
     tracked: dict[str, _Tracked] = field(default_factory=dict)
     collected: dict[str, Decimal] = field(default_factory=dict)
     final: set[str] = field(default_factory=set)
+    pending_unattributed: Decimal = _ZERO
+    pending_trade_ids: tuple[int, ...] = ()
+    acknowledged_seen: tuple[int, ...] = ()
+    acknowledged_qty: Decimal = _ZERO
+    human_alerted: bool = False
+    residual_alerted: Decimal = _ZERO
     want_stop: Decimal | None = None
     want_target: Decimal | None = None
     expires_at: datetime | None = None
@@ -174,18 +187,31 @@ class ReconciliationResult:
     unknown_open_orders: tuple[str, ...]
     unknown_trades: tuple[int, ...]
     protection_mismatches: tuple[str, ...]
+    inconclusive: tuple[str, ...] = ()
+    unknown_trade_refs: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
         return not (
-            self.divergences or self.unknown_open_orders or self.unknown_trades or self.protection_mismatches
+            self.divergences
+            or self.unknown_open_orders
+            or self.unknown_trades
+            or self.protection_mismatches
+            or self.inconclusive
         )
 
     def describe(self) -> str:
         parts = [d.detail for d in self.divergences]
         parts += [f"ordem desconhecida na corretora: {o}" for o in self.unknown_open_orders]
-        parts += [f"trade desconhecido: {t}" for t in self.unknown_trades]
+        parts += (
+            [f"trade desconhecido: {r}" for r in self.unknown_trade_refs]
+            if self.unknown_trade_refs
+            else [f"trade desconhecido: {t}" for t in self.unknown_trades]
+        )
         parts += list(self.protection_mismatches)
+        parts += [
+            f"{s}: historico de trades longo demais; conciliacao inconclusiva" for s in self.inconclusive
+        ]
         return "; ".join(parts)
 
 
@@ -217,6 +243,7 @@ class LiveGateway:
         on_alert: Alert | None = None,
         on_fill: Callable[[LiveFill], None] | None = None,
         on_audit: Callable[[dict[str, Any]], None] | None = None,
+        on_intent: Callable[[ProtectionIntent], None] | None = None,
     ) -> None:
         self._config = config
         self._client = client
@@ -227,6 +254,7 @@ class LiveGateway:
         self._sleep = sleep
         self._alert_cb = on_alert
         self._audit_cb = on_audit
+        self._intent_cb = on_intent
         self._fills = FillLog(
             on_fill,
             lambda n: self._alert("warning", f"sink de fills falhou; {n} fill(s) pendentes na outbox"),
@@ -241,6 +269,8 @@ class LiveGateway:
         self._submitted: list[Order] = []
         self._halt_reason: str | None = None
         self._started_ms = int(now().timestamp() * 1000)
+        self._trade_cursor: dict[Symbol, int] = {}
+        self._unknown_trades: dict[Symbol, set[int]] = {}
 
     # ---- estado/observabilidade -------------------------------------------------------------------
 
@@ -733,10 +763,45 @@ class LiveGateway:
 
     async def _advance_exposed(self, entry: _Entry) -> None:
         if not entry.rebuilt:
-            await self._rebuild(entry)
+            try:
+                await self._rebuild(entry)
+            except UnattributedSalesError as error:
+                await self._degraded_unattributed(entry, error)
+                return
             if entry.state != "exposed":
                 return
         await self._reprotect(entry, reason="retomada segura")
+
+    async def _degraded_unattributed(self, entry: _Entry, error: UnattributedSalesError) -> None:
+        """Venda sem dono na conta e SEM protecao viva: protege so o que e PROVAVELMENTE proprio
+        (min(owed - pendente, saldo livre); `_owed` ja desconta o pendente). Nunca acima do devido nem do
+        saldo livre. Nada a proteger (posicao ja vendida) encerra; ambiguo => exposto + pausa + alerta."""
+        if await self._find_live_protection(entry) is not None:
+            raise error
+        filters = await self._filters_or_stale(entry.symbol)
+        held = self._held(entry)
+        if self._sold(entry) > 0 and filters.round_quantity_down(held) < filters.min_qty:
+            await self._close_flat(entry, "posicao encerrada pela protecao")
+            return
+        free = await self._free_base(entry.symbol)
+        quantity = filters.round_quantity_down(min(self._owed(entry), free))
+        if quantity < filters.min_qty:
+            self._alert_human(entry, str(error))
+            raise error
+        entry.want_stop, entry.want_target = await self._last_known_levels(entry)
+        self._halt(f"{entry.entry_id}: venda sem dono na conta; protecao parcial ({quantity} de {held})")
+        self._alert_human(
+            entry,
+            f"{error} Protegida apenas a parte provavelmente propria: {quantity} de {held}.",
+        )
+        await self._arm(
+            entry, quantity, entry.want_stop, entry.want_target, filters, reason="protecao parcial"
+        )
+
+    def _alert_human(self, entry: _Entry, message: str) -> None:
+        if not entry.human_alerted:
+            entry.human_alerted = True
+            self._alert("critical", message)
 
     # ---- ledger -----------------------------------------------------------------------------------
 
@@ -754,9 +819,13 @@ class LiveGateway:
     def _sold(self, entry: _Entry) -> Decimal:
         return sum(entry.sold.values(), _ZERO)
 
-    def _owed(self, entry: _Entry) -> Decimal:
-        """Quantidade que ESTA entrada ainda detem na corretora: comprado liquido - vendido (nunca < 0)."""
+    def _held(self, entry: _Entry) -> Decimal:
         return max(_ZERO, entry.bought_gross - self._fee_in_base(entry) - self._sold(entry))
+
+    def _owed(self, entry: _Entry) -> Decimal:
+        """Quantidade que ESTA entrada ainda detem na corretora: comprado liquido - vendido (nunca < 0), menos
+        a venda sem dono pendente (so existe no modo degradado: a parte duvidosa nunca e vendida)."""
+        return max(_ZERO, self._held(entry) - entry.pending_unattributed)
 
     async def _fresh_owed(self, entry: _Entry) -> Decimal:
         """UNICO ponto que entrega `owed` para vender/proteger: confere antes na corretora (`_sync_ledger`).
@@ -864,12 +933,39 @@ class LiveGateway:
         )
         return await self._emergency_exit(entry, f"{reason}; orcamento de tempo da protecao esgotado")
 
-    async def _close_flat(self, entry: _Entry, reason: str) -> OrderReport:
+    def _own_residual(self, entry: _Entry) -> Decimal:
+        """Saldo bruto da entrada que a venda sem dono pendente esconde de `_owed`: provavelmente proprio e,
+        se nao encerrar, sem protecao. Zero quando nao ha pendente ou o resto e poeira."""
+        if entry.pending_unattributed <= 0:
+            return _ZERO
+        held = self._held(entry)
+        filters = self._filters.stale(entry.symbol)
+        return held if filters is None or filters.round_quantity_down(held) >= filters.min_qty else _ZERO
+
+    async def _close_flat(self, entry: _Entry, reason: str, *, guard_residual: bool = True) -> OrderReport:
+        if guard_residual and (residual := self._own_residual(entry)) > 0:
+            return await self._hold_residual(entry, residual)
         entry.emergency_alerted_at = None
         if entry.buy_open:
             entry.state, entry.protection = "working", None
             return await self._protection_report(entry)
         entry.state, entry.closed_reason, entry.protection = "closed", reason, None
+        return await self._protection_report(entry)
+
+    async def _hold_residual(self, entry: _Entry, residual: Decimal) -> OrderReport:
+        """A protecao encerrou mas sobra saldo provavelmente proprio atras da venda sem dono: nunca fecha.
+        Fica exposta + pausa e re-alerta (a parte duvidosa nao e vendida nem protegida sozinha)."""
+        self._expose(entry, entry.want_stop or entry.order.stop_loss, entry.want_target)
+        if not self.halted:
+            self._halt(f"{entry.entry_id}: residuo de {residual} sem protecao apos venda sem dono")
+        if entry.residual_alerted == residual:
+            return await self._protection_report(entry)
+        entry.residual_alerted = residual
+        self._alert(
+            "critical",
+            f"POSICAO PROPRIA DESPROTEGIDA: acao humana necessaria ({entry.symbol}, residuo {_fmt(residual)} "
+            f"na conta apos a protecao encerrar; venda(s) sem dono {entry.pending_unattributed}).",
+        )
         return await self._protection_report(entry)
 
     async def _filters_or_stale(self, symbol: Symbol) -> SymbolFilters:
@@ -890,7 +986,7 @@ class LiveGateway:
         else:
             cid = derived_id(entry.entry_id, f"X{generation}")
         leg = await self._get_order(entry.symbol, cid, critical=True)
-        if leg is None or str(leg["status"]) != "NEW":
+        if leg is None or str(leg["status"]) not in _LIVE:
             return False
         entry.protection = _Protection(
             Decimal(leg["origQty"]) - Decimal(leg["executedQty"]),
@@ -1012,7 +1108,9 @@ class LiveGateway:
         ids = self._ids(entry.entry_id, 0)
         stop_leg = await self._get_order(entry.symbol, ids["below"])
         status = str(stop_leg["status"]) if stop_leg else "MISSING"
-        if status == "NEW":
+        if status in _LIVE:
+            if status == "PARTIALLY_FILLED":
+                await self._sync_ledger(entry)
             self._adopt_opoco_legs(entry, stop_leg)
             return
         sold_before = self._sold(entry)
@@ -1034,7 +1132,10 @@ class LiveGateway:
     async def _rescue(self, entry: _Entry, *, reason: str) -> None:
         """Posicao sem protecao: limpa pernas mortas, coloca OCO avulsa; falhando, vende a mercado."""
         self._ensure_writable()
-        self._expose(entry, entry.order.stop_loss, entry.order.take_profit)
+        if entry.want_stop is None:
+            self._expose(entry, entry.order.stop_loss, entry.order.take_profit)
+        else:
+            self._expose(entry, entry.want_stop, entry.want_target)
         self._alert_exposure(entry, reason)
         with contextlib.suppress(BinanceApiError, OutcomeUnknownError):
             await self._cancel_list(entry.symbol, derived_id(entry.entry_id, "L0"), critical=True)
@@ -1050,6 +1151,7 @@ class LiveGateway:
         *,
         reason: str,
         routine: bool = False,
+        announced: bool = False,
     ) -> OrderReport:
         """Protege `quantity` (OCO ou stop puro) dentro do ORCAMENTO DE TEMPO da exposicao. NUNCA deixa
         excecao vazar com a posicao exposta: qualquer falha ou estouro do orcamento => venda de emergencia
@@ -1059,7 +1161,9 @@ class LiveGateway:
             self._alert_exposure(entry, reason)
         try:
             async with asyncio.timeout(self._budget_left(entry)):
-                return await self._arm_attempts(entry, quantity, stop, target, filters, reason=reason)
+                return await self._arm_attempts(
+                    entry, quantity, stop, target, filters, reason=reason, announced=announced
+                )
         except ProtectionError:
             raise
         except asyncio.CancelledError:
@@ -1080,7 +1184,14 @@ class LiveGateway:
         filters: SymbolFilters,
         *,
         reason: str,
+        announced: bool = False,
     ) -> OrderReport:
+        if not announced:
+            # Ja exposta: proteger vem antes; o anuncio so permite a recuperacao enxergar a geracao.
+            try:
+                self._announce(entry, stop, target)
+            except LiveError as error:
+                log.warning("live_generation_announce_failed", entry=entry.entry_id, error=str(error))
         entry.generation += 1
         generation = entry.generation
         ids = self._ids(entry.entry_id, generation)
@@ -1414,6 +1525,7 @@ class LiveGateway:
     async def _replace(
         self, entry: _Entry, prot: _Protection, stop: Decimal, target: Decimal | None, filters: SymbolFilters
     ) -> OrderReport:
+        self._announce(entry, stop, target)
         self._expose(entry, prot.stop, prot.target)
         # Dentro da janela nao ha leitura extra: o DELETE devolve o executado das pernas (`_record_reports`).
         legs_sold = await self._cancel_protection(entry, prot)
@@ -1421,12 +1533,30 @@ class LiveGateway:
         if quantity < filters.min_qty:
             return await self._close_flat(entry, "posicao encerrada pela protecao")
         report = await self._arm(
-            entry, quantity, stop, target, filters, reason="substituicao do stop falhou", routine=True
+            entry,
+            quantity,
+            stop,
+            target,
+            filters,
+            reason="substituicao do stop falhou",
+            routine=True,
+            announced=True,
         )
         if legs_sold:
             with contextlib.suppress(LiveError):
                 await self._sync_ledger(entry)
         return report
+
+    def _announce(self, entry: _Entry, stop: Decimal, target: Decimal | None) -> None:
+        """Write-ahead: o chamador persiste o nivel pretendido ANTES do DELETE. Falha => nada e cancelado."""
+        if self._intent_cb is None:
+            return
+        try:
+            self._intent_cb(ProtectionIntent(entry.entry_id, entry.generation + 1, stop, target))
+        except Exception as error:
+            raise LiveError(
+                f"{entry.entry_id}: persistencia da intencao de protecao falhou: {error}"
+            ) from error
 
     async def _cancel_protection(self, entry: _Entry, prot: _Protection) -> bool:
         """Caminho autorizado de cancelamento (so raise_stop/drop_target/venda). O CHAMADOR ja marcou a
@@ -1554,7 +1684,8 @@ class LiveGateway:
         entry.filled_at = entry.filled_at or self._mono()
         leg = await self._get_order(entry.symbol, self._ids(entry.entry_id, 0)["below"], critical=True)
         match str(leg["status"]) if leg else "MISSING":
-            case "NEW":
+            case "NEW" | "PARTIALLY_FILLED":
+                await self._sync_ledger(entry)
                 self._adopt_opoco_legs(entry, leg)
             case "PENDING_NEW":
                 with contextlib.suppress(BinanceApiError):
@@ -1562,7 +1693,7 @@ class LiveGateway:
 
     def _adopt_opoco_legs(self, entry: _Entry, stop_leg: dict[str, Any] | None) -> None:
         o = entry.order
-        quantity = Decimal(stop_leg["origQty"]) if stop_leg else o.quantity
+        quantity = Decimal(stop_leg["origQty"]) - Decimal(stop_leg["executedQty"]) if stop_leg else o.quantity
         entry.protection = _Protection(quantity, o.stop_loss, o.take_profit, 0)
         entry.state = "protected"
 
@@ -1891,43 +2022,105 @@ class LiveGateway:
         return buy
 
     async def _check_unattributed_sells(self, group: list[_Entry]) -> None:
-        """Venda na conta apos a compra que nenhuma ordem reconstruida explica: `owed` pode estar inflado e
-        proteger/vender saldo alheio. Conservador: recusa (entrada `exposed`; manual via close_orphan)."""
+        """Venda na conta apos o fill de ENTRY de cada entrada que nenhuma ordem reconstruida explica. Nao ha
+        como provar de qual posicao saiu (a venda alheia pode ter vindo do saldo livre ou do robo): a
+        quantidade fica em `pending_unattributed` (por entrada, so trades posteriores ao fill dela, sem somar
+        entre entradas) e `_apply_rebuilt` recusa (pausa + alerta; decisao do operador)."""
         symbol = group[0].symbol
-        starts = [
-            int(fill.filled_at.timestamp() * 1000)
-            for e in group
-            for fill in self._fills.all()
-            if fill.entry_id == e.entry_id and fill.kind is FillKind.ENTRY
-        ]
-        if not starts:
-            return
-        trades = await self._client.request(
-            "GET",
-            "/api/v3/myTrades",
-            {"symbol": to_exchange_symbol(symbol), "startTime": min(starts)},
-            signed=True,
-            weight=20,
-            critical=True,
-        )
-        unknown = [
-            t["id"] for t in trades if not t["isBuyer"] and not self._fills.knows(symbol, int(t["id"]))
-        ]
-        if unknown:
-            raise UnattributedSalesError(
-                f"{len(unknown)} venda(s) na conta apos a compra sem ordem conhecida (trades {unknown[:5]}); "
-                "informe exit_client_ids ou use close_orphan"
+        starts = {
+            e.entry_id: min(
+                (
+                    int(f.filled_at.timestamp() * 1000)
+                    for f in self._fills.all()
+                    if f.entry_id == e.entry_id and f.kind is FillKind.ENTRY
+                ),
+                default=None,
             )
+            for e in group
+        }
+        known_starts = [s for s in starts.values() if s is not None]
+        if not known_starts:
+            return
+        trades = await self._trades_since(symbol, min(known_starts), critical=True)
+        unknown = [t for t in trades if not t["isBuyer"] and not self._fills.knows(symbol, int(t["id"]))]
+        for entry in group:
+            start = starts[entry.entry_id]
+            acknowledged = set(entry.recover.acknowledged_trade_ids) if entry.recover else set()
+            mine = [] if start is None else [t for t in unknown if int(t["time"]) >= start]
+            open_ = [t for t in mine if int(t["id"]) not in acknowledged]
+            confirmed = [t for t in mine if int(t["id"]) in acknowledged]
+            entry.pending_unattributed = sum((Decimal(str(t["qty"])) for t in open_), _ZERO)
+            entry.pending_trade_ids = tuple(sorted(int(t["id"]) for t in open_))
+            entry.acknowledged_seen = tuple(sorted(int(t["id"]) for t in confirmed))
+            entry.acknowledged_qty = sum((Decimal(str(t["qty"])) for t in confirmed), _ZERO)
+
+    async def _trades_since(
+        self,
+        symbol: Symbol,
+        start_ms: int,
+        *,
+        critical: bool,
+        from_id: int | None = None,
+        sink: dict[int, dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """TODAS as execucoes da conta no simbolo desde `start_ms`. A Binance limita a pagina e nao aceita
+        `fromId` junto de `startTime`: a 1a pagina usa `startTime`, as demais `fromId`. Pagina ate vir uma
+        pagina incompleta (sem requisicao extra); estourar o teto levanta `TradeHistoryTooLongError`
+        (fail-closed) em vez de ler uma historia truncada. `from_id` (cursor do reconcile) substitui
+        `startTime`; `sink` recebe o que foi lido mesmo quando o teto estoura (progresso do cursor)."""
+        base = {"symbol": to_exchange_symbol(symbol), "limit": str(_TRADE_PAGE_LIMIT)}
+        params = base | ({"startTime": str(start_ms)} if from_id is None else {"fromId": str(from_id)})
+        seen: dict[int, dict[str, Any]] = sink if sink is not None else {}
+        for _ in range(_MAX_TRADE_PAGES):
+            page = await self._client.request(
+                "GET", "/api/v3/myTrades", params, signed=True, weight=20, critical=critical
+            )
+            before = len(seen)
+            seen.update({int(t["id"]): t for t in page})
+            if len(page) < _TRADE_PAGE_LIMIT or len(seen) == before:
+                return list(seen.values())
+            params = base | {"fromId": str(max(seen) + 1)}
+        raise TradeHistoryTooLongError(f"{symbol}: historico de trades alem de {_MAX_TRADE_PAGES} paginas")
 
     async def _apply_rebuilt(self, entry: _Entry, buy: dict[str, Any]) -> tuple[RecoveryOutcome, str]:
         symbol = entry.symbol
         executed = Decimal(buy["executedQty"])
         filters = await self._filters_or_stale(symbol)
         live = await self._find_live_protection(entry)
+        if entry.pending_unattributed > 0:
+            head = (
+                f"POSICAO PROPRIA DESPROTEGIDA: acao humana necessaria ({symbol}, devido "
+                f"{_fmt(self._held(entry))}). "
+                if live is None
+                else ""
+            )
+            raise UnattributedSalesError(
+                f"{head}{entry.entry_id}: venda(s) na conta apos a compra ({entry.pending_unattributed}) "
+                f"sem ordem conhecida (trades {list(entry.pending_trade_ids)}): nao ha como provar a que "
+                "posicao pertencem; a protecao viva (se houver) permanece intacta e nada alheio e vendido. "
+                "Operador: confira esses trades na corretora; se forem alheios, informe os ids em "
+                "acknowledged_trade_ids e reinicie/recupere; se forem desta posicao, informe exit_client_ids "
+                "ou venda com close_orphan"
+            )
+        levels = (live.stop, live.target) if live else await self._last_known_levels(entry)
         entry.rebuilt = True
-        o = entry.order
-        levels = (live.stop, live.target) if live else (o.stop_loss, o.take_profit)
         entry.want_stop, entry.want_target = levels
+        if entry.acknowledged_seen:
+            by = entry.recover.acknowledged_by if entry.recover else ""
+            log.warning(
+                "live_foreign_sales_acknowledged",
+                entry=entry.entry_id,
+                trades=list(entry.acknowledged_seen),
+                quantity=str(entry.acknowledged_qty),
+                by=by or "desconhecido",
+                at=self._now().isoformat(),
+            )
+            self._alert(
+                "warning",
+                f"{entry.entry_id}: venda(s) alheia(s) ({entry.acknowledged_qty}, trades "
+                f"{list(entry.acknowledged_seen)}) confirmada(s) por {by or 'operador'}; "
+                "nao abatida(s) da posicao devida",
+            )
         buy_live = str(buy["status"]) not in _DONE
         if executed == 0:
             if buy_live:
@@ -1969,11 +2162,19 @@ class LiveGateway:
         if persisted is None:
             return
         cid = entry.entry_id
-        entry.generation = max(entry.generation, persisted.generation + _GENERATION_LOOKAHEAD)
-        for generation in range(entry.generation + 1):
+        generation, last_seen = 0, persisted.generation
+        if last_seen + _GENERATION_LOOKAHEAD > _MAX_GENERATIONS:
+            raise ProtectionError(f"{cid}: geracoes de protecao alem do limite sondavel")
+        while generation <= last_seen + _GENERATION_LOOKAHEAD:
             ids = self._ids(cid, generation)
             self._track_legs(entry, generation, ids, oco=True)
             self._track_legs(entry, generation, ids, oco=False)
+            if generation > last_seen and await self._generation_exists(entry, generation):
+                last_seen = generation
+            generation += 1
+        if last_seen + _GENERATION_LOOKAHEAD > _MAX_GENERATIONS:
+            raise ProtectionError(f"{cid}: geracoes de protecao alem do limite sondavel")
+        entry.generation = max(entry.generation, last_seen + _GENERATION_LOOKAHEAD)
         sequence = 0
         while sequence < _MAX_EMERGENCY_PROBES:
             em = derived_id(cid, f"EM{sequence}")
@@ -1986,6 +2187,41 @@ class LiveGateway:
             if await self._get_order(entry.symbol, exit_id, critical=True) is not None:
                 entry.tracked[exit_id] = _Tracked(FillKind.EXIT, None)
 
+    async def _generation_exists(self, entry: _Entry, generation: int) -> bool:
+        ids = self._ids(entry.entry_id, generation)
+        for cid in (ids["below"], ids["above"], derived_id(entry.entry_id, f"X{generation}")):
+            if await self._get_order(entry.symbol, cid, critical=True) is not None:
+                return True
+        return False
+
+    async def _last_known_levels(self, entry: _Entry) -> tuple[Decimal, Decimal | None]:
+        """Niveis da geracao MAIS ALTA que chegou a existir na corretora (viva ou nao): stops so sobem, e o
+        melhor piso conhecido quando nenhuma protecao esta viva (ex.: queda entre o DELETE e o POST do
+        raise_stop). O stop persistido pelo chamador (`PersistedEntry.stop_loss`) so o eleva."""
+        o, persisted = entry.order, entry.recover
+        stop: Decimal = o.stop_loss
+        target: Decimal | None = o.take_profit
+        for generation in range(entry.generation, -1, -1):
+            ids = self._ids(entry.entry_id, generation)
+            leg = await self._get_order(entry.symbol, ids["below"], critical=True)
+            if leg is not None:
+                above = await self._get_order(entry.symbol, ids["above"], critical=True)
+                stop = Decimal(leg["stopPrice"])
+                target = Decimal(above["price"]) if above is not None else target
+                break
+            alone = await self._get_order(
+                entry.symbol, derived_id(entry.entry_id, f"X{generation}"), critical=True
+            )
+            if alone is not None:
+                stop, target = Decimal(alone["stopPrice"]), None
+                break
+        if persisted is not None:
+            if persisted.stop_loss is not None:
+                stop = max(stop, persisted.stop_loss)
+            if persisted.target_dropped:
+                target = None
+        return max(stop, o.stop_loss), target
+
     async def _find_live_protection(self, entry: _Entry) -> _Protection | None:
         """Protecao NEW de maior geracao (OCO ou stop avulso) desta entrada na corretora."""
         symbol, cid = entry.symbol, entry.entry_id
@@ -1996,12 +2232,12 @@ class LiveGateway:
                 (derived_id(cid, f"X{generation}"), None),
             ):
                 leg = await self._get_order(symbol, stop_id, critical=True)
-                if leg is None or str(leg["status"]) != "NEW":
+                if leg is None or str(leg["status"]) not in _LIVE:
                     continue
                 target: Decimal | None = None
                 if above_id is not None:
                     above = await self._get_order(symbol, above_id, critical=True)
-                    if above is not None and str(above["status"]) == "NEW":
+                    if above is not None and str(above["status"]) in _LIVE:
                         target = Decimal(above["price"])
                 return _Protection(
                     Decimal(leg["origQty"]) - Decimal(leg["executedQty"]),
@@ -2090,7 +2326,9 @@ class LiveGateway:
             order_ids.append(derived_id(held.entry_id, f"EM{held.em_seq - 1}"))
             executed, remaining = executed + done, remaining - take
             if self._is_flat(held, filters):
-                await self._close_flat(held, f"orfao encerrado pelo operador {confirmation.operator}")
+                await self._close_flat(
+                    held, f"orfao encerrado pelo operador {confirmation.operator}", guard_residual=False
+                )
         self._audit("orphan_close_done", **base, executed=str(executed), orders=order_ids)
         return OrphanCloseResult(symbol, quantity, applied, executed, tuple(order_ids))
 
@@ -2114,10 +2352,18 @@ class LiveGateway:
             if Decimal(b["free"]) or Decimal(b["locked"])
         }
         known_cids = self._known_client_ids()
+        acknowledged = {
+            (e.symbol, i)
+            for e in self._entries.values()
+            if e.recover
+            for i in e.recover.acknowledged_trade_ids
+        }
         stops: list[ProtectiveStop] = []
         stop_orders: list[dict[str, Any]] = []
         unknown: list[str] = []
         unknown_trades: list[int] = []
+        unknown_refs: list[str] = []
+        inconclusive: list[str] = []
         for symbol in sorted(self._config.allowed_symbols):
             ex = to_exchange_symbol(symbol)
             orders = await self._client.request(
@@ -2133,14 +2379,35 @@ class LiveGateway:
                         stops.append(
                             ProtectiveStop(symbol=symbol, quantity=qty, stop_price=Decimal(o["stopPrice"]))
                         )
-            trades = await self._client.request(
-                "GET",
-                "/api/v3/myTrades",
-                {"symbol": ex, "startTime": self._started_ms},
-                signed=True,
-                weight=20,
+            read: dict[int, dict[str, Any]] = {}
+            try:
+                await self._trades_since(
+                    symbol,
+                    self._started_ms,
+                    critical=False,
+                    from_id=self._trade_cursor.get(symbol),
+                    sink=read,
+                )
+            except TradeHistoryTooLongError:
+                inconclusive.append(symbol)
+            finally:
+                if read:
+                    self._trade_cursor[symbol] = max(read) + 1
+                    pool = self._unknown_trades.setdefault(symbol, set())
+                    pool.update(i for i in read if not self._fills.knows(symbol, i))
+                    if len(pool) > _MAX_UNKNOWN_TRADES:
+                        keep = sorted(pool)[-_MAX_UNKNOWN_TRADES:]
+                        log.warning(
+                            "live_unknown_trades_trimmed", symbol=symbol, dropped=len(pool) - len(keep)
+                        )
+                        self._unknown_trades[symbol] = set(keep)
+            fresh = sorted(
+                i
+                for i in self._unknown_trades.get(symbol, ())
+                if not self._fills.knows(symbol, i) and (symbol, i) not in acknowledged
             )
-            unknown_trades += [int(t["id"]) for t in trades if not self._fills.knows(symbol, int(t["id"]))]
+            unknown_trades += fresh
+            unknown_refs += [f"{symbol}:{i}" for i in fresh]
         prices: dict[str, Decimal] = {}
         for asset in balances:
             symbol = f"{asset}/{self._config.quote_asset}"
@@ -2149,7 +2416,14 @@ class LiveGateway:
         snapshot = AccountSnapshot(balances=balances, stops=tuple(stops), prices=prices)
         found = reconcile(local, snapshot, config=self._risk, ignored_assets=ignored_assets_for(self._risk))
         mismatches = self._protection_mismatches(stop_orders)
-        result = ReconciliationResult(found, tuple(unknown), tuple(unknown_trades), tuple(mismatches))
+        result = ReconciliationResult(
+            found,
+            tuple(unknown),
+            tuple(unknown_trades),
+            tuple(mismatches),
+            tuple(inconclusive),
+            tuple(unknown_refs),
+        )
         if not result.ok:
             self._halt(f"reconciliacao: {result.describe()}")
         return result

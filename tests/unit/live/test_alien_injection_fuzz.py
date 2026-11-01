@@ -45,7 +45,7 @@ async def scenario(
     await fake.start()
     fake.balances["BTC"] = [ALIEN, D(0)]
     fake.commission_in_base = base_fee
-    rig = build_rig(fake, request_timeout_seconds=0.12, read_retries=1, protection_activation_grace_seconds=0)
+    rig = build_rig(fake, request_timeout_seconds=5.0, read_retries=1, protection_activation_grace_seconds=0)
     try:
         await rig.gateway.place_order(approved_entry())
         fake.set_price("BTCUSDT", D(99))

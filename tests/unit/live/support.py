@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -9,6 +9,7 @@ from engine.infrastructure.live.client import BinanceRestClient
 from engine.infrastructure.live.config import LiveConfig
 from engine.infrastructure.live.credentials import ApiCredentials
 from engine.infrastructure.live.gateway import LiveGateway
+from engine.infrastructure.live.recovery import ProtectionIntent
 from tests.fakes.fake_binance import API_KEY, API_SECRET, FakeBinance
 from tests.unit.risk.factories import EMPTY_CALENDAR, NOW, history, market, rules, signal
 
@@ -48,7 +49,9 @@ def live_config(fake: FakeBinance, **overrides: Any) -> LiveConfig:
     return LiveConfig(**(base | overrides))
 
 
-def build_rig(fake: FakeBinance, **overrides: Any) -> Rig:
+def build_rig(
+    fake: FakeBinance, on_intent: Callable[[ProtectionIntent], None] | None = None, **overrides: Any
+) -> Rig:
     config = live_config(fake, **overrides)
     client = BinanceRestClient(config, fake_credentials(), sleep=no_sleep)
     alerts: list[tuple[str, str]] = []
@@ -59,6 +62,7 @@ def build_rig(fake: FakeBinance, **overrides: Any) -> Rig:
         now=lambda: NOW,
         sleep=no_sleep,
         on_alert=lambda level, msg: alerts.append((level, msg)),
+        on_intent=on_intent,
     )
     return Rig(fake, gateway, client, alerts)
 

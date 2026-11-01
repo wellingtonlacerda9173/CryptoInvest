@@ -8,6 +8,7 @@ from engine.infrastructure.live.recovery import (
     OperatorConfirmation,
     OrphanCloseResult,
     PersistedEntry,
+    ProtectionIntent,
     RecoveredEntry,
     RecoveryResult,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "OperatorConfirmation",
     "OrphanCloseResult",
     "PersistedEntry",
+    "ProtectionIntent",
     "ReconciliationResult",
     "RecoveredEntry",
     "RecoveryResult",

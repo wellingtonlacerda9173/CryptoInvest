@@ -57,6 +57,10 @@ class UnattributedSalesError(ProtectionError):
     """Venda na conta apos a compra que nenhuma ordem reconstruida explica (recuperacao recusada)."""
 
 
+class TradeHistoryTooLongError(LiveError):
+    """Historico de /myTrades alem do teto de paginas: leitura inconclusiva (nao truncar em silencio)."""
+
+
 class ProtectiveOrderCancelError(ProtectionError):
     """Cancelar OCO/stop fora de raise_stop, emergencia ou venda executada e proibido."""
 
