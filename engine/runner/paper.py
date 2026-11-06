@@ -21,7 +21,7 @@ from sqlalchemy import text
 from engine.application.backtest import default_rules
 from engine.application.risk import EventCalendar, SymbolRules
 from engine.application.selector import SelectorSettings
-from engine.application.strategies.registry import STRATEGY_REGISTRY
+from engine.application.strategies.registry import STRATEGY_REGISTRY, default_strategy_names
 from engine.domain.risk import RiskConfig
 from engine.domain.types import Timeframe
 from engine.infrastructure.ai.factory import build_analyst
@@ -289,7 +289,7 @@ async def run_start(args: argparse.Namespace) -> int:
     config = versioned.config
     strategies = versioned.strategies or build_strategies(config.strategies, config.params)
     if config.selector.enabled:
-        names = [n for n in config.strategies if n in STRATEGY_REGISTRY] or list(STRATEGY_REGISTRY)
+        names = [n for n in config.strategies if n in STRATEGY_REGISTRY] or default_strategy_names()
         config = config.model_copy(update={"strategies": tuple(names)})
         strategies = [STRATEGY_REGISTRY[n]() for n in names]
     paths.config.write_text(config.model_dump_json(indent=2), encoding="utf-8")

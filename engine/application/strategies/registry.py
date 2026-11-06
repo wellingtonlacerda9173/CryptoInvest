@@ -8,6 +8,7 @@ from engine.application.strategies.ema_cross_trend import EmaCrossTrend
 from engine.application.strategies.mean_reversion import BollingerRsiReversion
 from engine.application.strategies.momentum import MacdCross, RsiBullishDivergence
 from engine.application.strategies.price_action import BullishEngulfing, BullishPinBar, SupportRetest
+from engine.application.strategies.pullback_trend import PullbackTrend
 from engine.application.strategies.trend_following import SupertrendFlip
 from engine.application.strategies.vwap import VwapReclaim
 from engine.domain.types import Timeframe
@@ -25,11 +26,20 @@ _FACTORIES: tuple[Callable[[], Strategy], ...] = (
     MacdCross,
     RsiBullishDivergence,
     VwapReclaim,
+    PullbackTrend,
 )
 
 STRATEGY_REGISTRY: Mapping[str, Callable[[], Strategy]] = MappingProxyType(
     {factory().name: factory for factory in _FACTORIES}
 )
+
+# Catalogadas para pesquisa/backtest, mas fora de qualquer padrao de paper/producao ate haver evidencia
+# de vantagem (docs/pullback_trend.md). Ligar uma delas e uma decisao explicita e consciente.
+EXPERIMENTAL_STRATEGIES: frozenset[str] = frozenset({"pullback_trend"})
+
+
+def default_strategy_names() -> list[str]:
+    return [name for name in STRATEGY_REGISTRY if name not in EXPERIMENTAL_STRATEGIES]
 
 
 def is_applicable(name: str, timeframe: Timeframe) -> bool:
