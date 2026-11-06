@@ -28,6 +28,9 @@ CONFLUENCE_FAMILIES: Final[Mapping[str, Family]] = {
     "range_testado_na_resistencia": Family.STRUCTURE,
     "rsi_saindo_de_sobrevenda": Family.MOMENTUM,
     "histograma_macd_subindo": Family.MOMENTUM,
+    "tendencia_de_alta_ema_longa": Family.TREND,
+    "pullback_na_ema_curta": Family.STRUCTURE,
+    "retomada_acima_da_maxima_anterior": Family.MOMENTUM,
 }
 
 # Pre-requisitos obrigatorios do setup: nao sao confluencias e nunca entram na contagem.
@@ -56,6 +59,7 @@ TRIGGERS: Final = frozenset(
         "reclaim_do_vwap",
         "rejeicao_no_vwap",
         "sessao_com_amostra_minima",
+        "pullback_com_retomada_na_tendencia",
     }
 )
 

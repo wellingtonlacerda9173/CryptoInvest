@@ -24,6 +24,7 @@ from engine.application.strategies.price_action import (
     SupportRetest,
     SupportRetestConfig,
 )
+from engine.application.strategies.pullback_trend import PullbackTrend, PullbackTrendConfig
 from engine.application.strategies.registry import STRATEGY_REGISTRY
 from engine.application.strategies.trend_following import SupertrendFlip, SupertrendFlipConfig
 from engine.application.strategies.vwap import VwapConfig, VwapReclaim
@@ -45,6 +46,8 @@ __all__ = [
     "LevelsConfig",
     "MacdCross",
     "MacdCrossConfig",
+    "PullbackTrend",
+    "PullbackTrendConfig",
     "RangeBreakout",
     "RangeBreakoutConfig",
     "RsiBullishDivergence",

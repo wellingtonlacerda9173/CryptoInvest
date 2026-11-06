@@ -137,7 +137,11 @@ def test_vetoes_and_missing_triggers_block_the_signal(case: Case, label: str) ->
 
 class TestSharedGuards:
     def test_registry_has_all_strategies_and_matching_names(self) -> None:
-        expected = {case.id for case in CASES} | {"elephant_bar_breakout", "ema_cross_trend"}
+        expected = {case.id for case in CASES} | {
+            "elephant_bar_breakout",
+            "ema_cross_trend",
+            "pullback_trend",
+        }
         assert set(STRATEGY_REGISTRY) == expected
         for name, factory in STRATEGY_REGISTRY.items():
             strategy = factory()
